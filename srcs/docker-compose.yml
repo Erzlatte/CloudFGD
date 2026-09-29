@@ -1,0 +1,45 @@
+services:
+  app:
+    build: ./requirements/app
+    image: app-go-fgd
+    container_name: app
+    env_file: .env
+    volumes:
+      - app_data:/data
+    networks:
+      - cloudfgd
+    restart: unless-stopped
+
+  proxy:
+    build: ./requirements/proxy
+    image: proxy-go-fgd
+    container_name: proxy
+    env_file: .env
+    ports:
+      - "443:443"
+    volumes:
+      - certs_data:/certs
+    networks:
+      - cloudfgd
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  app_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR}/app
+  certs_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR}/certs
+
+networks:
+  cloudfgd:
+    driver: bridge

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CloudFGD · Libro de visitas</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/app.js" defer></script>
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Libro de visitas</h1>
+      <p class="sub">Go + Docker · proxy TLS y app en contenedores separados</p>
+    </header>
+
+    <form id="message-form" method="post" action="/messages">
+      <input id="author" name="author" placeholder="Tu nombre" maxlength="50" required>
+      <textarea id="content" name="content" placeholder="Tu mensaje" rows="3" maxlength="500" required></textarea>
+      <div class="form-footer">
+        <span id="counter" class="counter">0 / 500</span>
+        <button type="submit">Enviar</button>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </form>
+
+    <section>
+      <h2>Mensajes <span id="total" class="badge"></span></h2>
+      <div id="messages">
+        <p class="empty">Cargando mensajes…</p>
+      </div>
+    </section>
+  </main>
+
+  <template id="message-template">
+    <article class="msg">
+      <header>
+        <strong class="msg-author"></strong>
+        <time class="msg-date"></time>
+      </header>
+      <p class="msg-content"></p>
+    </article>
+  </template>
+</body>
+</html>
