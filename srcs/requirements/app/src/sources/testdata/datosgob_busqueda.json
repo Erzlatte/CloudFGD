@@ -1,0 +1,46 @@
+{
+  "format": "linked-data-api",
+  "version": "0.2",
+  "result": {
+    "_about": "https://datos.gob.es/apidata/catalog/dataset/title/empleo.json?_pageSize=10&_page=0",
+    "items": [
+      {
+        "_about": "https://datos.gob.es/catalogo/ea0010587-paro-registrado-por-municipio",
+        "title": [
+          { "_value": "Registered unemployment by municipality", "_lang": "en" },
+          { "_value": "Paro registrado por municipio", "_lang": "es" }
+        ],
+        "description": [
+          { "_value": "Número de personas en paro registradas en las oficinas de empleo, por municipio y mes.", "_lang": "es" }
+        ],
+        "publisher": "https://datos.gob.es/recurso/sector-publico/org/Organismo/EA0010587",
+        "theme": [
+          "https://datos.gob.es/kos/sector-publico/sector/empleo",
+          "https://datos.gob.es/kos/sector-publico/sector/economia"
+        ],
+        "keyword": [
+          { "_value": "paro", "_lang": "es" },
+          { "_value": "unemployment", "_lang": "en" },
+          { "_value": "empleo", "_lang": "es" }
+        ],
+        "issued": "Tue, 03 Jan 2017 09:00:00 GMT",
+        "modified": "Wed, 15 Oct 2026 08:30:00 GMT"
+      },
+      {
+        "_about": "https://datos.gob.es/catalogo/l01280796-ofertas-de-empleo-publico",
+        "title": "Ofertas de empleo público",
+        "description": { "_value": "Convocatorias del Ayuntamiento.", "_lang": "es" },
+        "publisher": { "name": [ { "_value": "Ayuntamiento de Madrid", "_lang": "es" } ] },
+        "theme": "https://datos.gob.es/kos/sector-publico/sector/sector-publico",
+        "keyword": [ "empleo público", "oposiciones" ],
+        "modified": "2025-06-30T10:00:00Z"
+      },
+      {
+        "title": "Elemento sin _about: se descarta"
+      }
+    ],
+    "itemsPerPage": 10,
+    "page": 0,
+    "startIndex": 1
+  }
+}

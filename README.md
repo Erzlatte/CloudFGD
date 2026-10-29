@@ -15,6 +15,29 @@ A través de CloudFGD, buscaremos demostrar cómo la coordinación de estas áre
 
 ---
 
+## Producto 1: archivador de información pública
+
+La aplicación es una web con **API REST propia** que consulta APIs públicas y deja guardar lo que
+cada usuario quiere seguir:
+
+1. **Buscar** en varias fuentes desde un único buscador (hoy: BOE y datos.gob.es).
+2. **Ver el detalle** de un resultado: título, fecha, resumen, datos de la fuente y enlace oficial.
+3. **Guardar** lo que interesa, con etiquetas y una nota personal.
+4. **Consultar la lista de guardados**, filtrarla por fuente, etiqueta o fecha, y borrar elementos.
+
+La web no sustituye a las fuentes oficiales: las consulta, normaliza lo que devuelven y guarda una
+copia ligera de lo marcado, siempre con el enlace a la publicación original.
+
+| Documento | Contenido |
+|-----------|-----------|
+| [docs/API.md](docs/API.md) | Referencia de la API REST propia: rutas, parámetros, respuestas y errores |
+| [docs/CONECTORES.md](docs/CONECTORES.md) | Cómo se consulta cada API pública y cómo añadir una fuente nueva |
+| [docs/FRONTEND.md](docs/FRONTEND.md) | Pantallas, ficheros y funcionamiento de la interfaz |
+| [CHANGELOG.md](CHANGELOG.md) | Qué ha cambiado respecto al libro de visitas |
+| [DEVOPS_AWS_K8S.md](DEVOPS_AWS_K8S.md) | Plan opcional para llevar el proyecto a AWS con Kubernetes |
+
+---
+
 ## Índice
 
 1. [Arquitectura](#1-arquitectura)
@@ -22,7 +45,7 @@ A través de CloudFGD, buscaremos demostrar cómo la coordinación de estas áre
 3. [Cómo funciona una petición](#3-cómo-funciona-una-petición)
 4. [El servicio `proxy`](#4-el-servicio-proxy)
 5. [El servicio `app`](#5-el-servicio-app)
-6. [El frontend: HTML, CSS y JavaScript](#6-el-frontend-html-css-y-javascript)
+6. [El frontend](#6-el-frontend)
 7. [Docker: imágenes, compose y volúmenes](#7-docker-imágenes-compose-y-volúmenes)
 8. [Health checks](#8-health-checks)
 9. [Uso y comandos del Makefile](#9-uso-y-comandos-del-makefile)
@@ -35,25 +58,25 @@ A través de CloudFGD, buscaremos demostrar cómo la coordinación de estas áre
 ## 1. Arquitectura
 
 ```
-                 Host                              Red Docker "cloudfgd"
- ┌──────────────────────────┐        ┌─────────────────────────────────────────────────┐
- │                          │  443   │  ┌──────────────┐   HTTP   ┌──────────────────┐ │
- │  Navegador  ─────────────┼────────┼─>│    proxy     │─────────>│       app        │ │
- │  https://localhost       │  TLS   │  │  (Go, :443)  │  :8080   │   (Go, :8080)    │ │
- │                          │1.2/1.3 │  └──────┬───────┘          └────────┬─────────┘ │
- └──────────────────────────┘        │         │ /certs                    │ /data     │
-                                     └─────────┼───────────────────────────┼───────────┘
-                                               ▼                           ▼
-                                         ~/data/certs              ~/data/app/messages.json
+                 Host                                Red Docker "cloudfgd"                          Internet
+ ┌─────────────────────────┐       ┌────────────────────────────────────────────────┐
+ │                         │  443  │  ┌─────────────┐  HTTP  ┌──────────────────────┐ │  HTTPS  ┌──────────────┐
+ │  Navegador  ────────────┼───────┼─>│   proxy     │───────>│        app           │─┼────────>│ API del BOE  │
+ │  https://localhost      │  TLS  │  │ (Go, :443)  │ :8080  │     (Go, :8080)      │ │         └──────────────┘
+ │                         │       │  └──────┬──────┘        │ API REST + conectores│─┼────────>┌──────────────┐
+ └─────────────────────────┘       │         │ /certs        └──────────┬───────────┘ │         │ datos.gob.es │
+                                   └─────────┼──────────────────────────┼─────────────┘         └──────────────┘
+                                             ▼                          ▼ /data
+                                       ~/data/certs             ~/data/app/saved.json
 ```
 
 | Servicio | Puerto | Expuesto al host | Responsabilidad |
 |----------|--------|------------------|-----------------|
 | `proxy`  | 443    | **Sí** (único)   | Termina TLS, genera el certificado, reenvía peticiones a `app`, registra accesos |
-| `app`    | 8080   | No               | Sirve el frontend, expone la API JSON y guarda los mensajes en disco |
+| `app`    | 8080   | No               | Sirve el frontend, expone la API REST, consulta las APIs públicas y guarda los elementos de interés |
 
-Solo el puerto 443 está publicado. La `app` solo es alcanzable desde dentro de la red Docker,
-de modo que **todo el tráfico externo pasa obligatoriamente por TLS**.
+El navegador **solo habla con el proxy**, y la `app` es la única pieza que llama a las fuentes públicas
+y al almacén de guardados. Así el navegador nunca depende directamente de una API externa.
 
 ---
 
@@ -61,176 +84,167 @@ de modo que **todo el tráfico externo pasa obligatoriamente por TLS**.
 
 ```
 CloudFGD/
-├── Makefile                         # Punto de entrada: make, make down, make health...
+├── Makefile                         # make, make down, make health, make test...
 ├── README.md
-├── .gitignore
+├── CHANGELOG.md                     # Cambios de cada versión
+├── DEVOPS_AWS_K8S.md                # Plan opcional AWS + Kubernetes
+├── docs/
+│   ├── API.md                       # Referencia de la API REST propia
+│   ├── CONECTORES.md                # Conectores a las APIs públicas
+│   └── FRONTEND.md                  # Interfaz web
 └── srcs/
-    ├── .env                         # Variables de entorno (dominio, puertos)
-    ├── docker-compose.yml           # Orquestación: servicios, red, volúmenes
+    ├── .env                         # Variables de entorno (dominio, puertos, timeout)
+    ├── docker-compose.yml
     └── requirements/
-        ├── proxy/                   # ── Servicio 1: proxy inverso TLS ──
+        ├── proxy/                   # ── Servicio 1: proxy inverso TLS (sin cambios) ──
         │   ├── Dockerfile
         │   └── src/
-        │       ├── go.mod
-        │       ├── main.go          # Arranque, configuración TLS y reverse proxy
-        │       ├── cert.go          # Generación del certificado autofirmado
-        │       └── healthcheck.go   # Cliente usado por el HEALTHCHECK de Docker
-        └── app/                     # ── Servicio 2: aplicación web ──
-            ├── Dockerfile
+        │       ├── main.go
+        │       ├── cert.go
+        │       └── healthcheck.go
+        └── app/                     # ── Servicio 2: aplicación ──
+            ├── Dockerfile           # Incluye una etapa "test" para make test
             └── src/
                 ├── go.mod
-                ├── main.go          # Arranque del servidor y definición de rutas
-                ├── handlers.go      # Handlers HTTP: API, formulario y /healthz
-                ├── store.go         # Persistencia de mensajes en JSON
-                ├── healthcheck.go   # Cliente usado por el HEALTHCHECK de Docker
+                ├── main.go          # Arranque, configuración y rutas
+                ├── handlers.go      # Handlers de la API REST y /healthz
+                ├── handlers_test.go # Tests de la API (sin red)
+                ├── store.go         # Guardados: JSON con mutex y escritura atómica
+                ├── healthcheck.go
+                ├── sources/         # Conectores a las APIs públicas
+                │   ├── source.go    # Interfaz común Source y formato Result
+                │   ├── search.go    # Búsqueda en varias fuentes a la vez
+                │   ├── boe.go       # Conector del BOE
+                │   ├── datosgob.go  # Conector de datos.gob.es
+                │   ├── sources_test.go
+                │   └── testdata/    # Respuestas de ejemplo para los tests
                 └── web/             # Frontend (se incrusta en el binario)
-                    ├── html/
-                    │   └── index.html
-                    ├── css/
-                    │   └── style.css
-                    └── js/
-                        └── app.js
+                    ├── html/index.html
+                    ├── css/style.css
+                    └── js/app.js
 ```
 
-Ambos servicios usan **solo la librería estándar de Go**: no hay dependencias externas,
-ni `go.sum`, ni descargas durante la compilación más allá del propio compilador.
+Ambos servicios siguen usando **solo la librería estándar de Go**: no hay dependencias externas.
 
 ---
 
 ## 3. Cómo funciona una petición
 
-**Cargar la página**
+**Buscar**
 
-1. El navegador pide `https://localhost/`.
-2. `proxy` acepta la conexión TLS (1.2 o 1.3) y reenvía la petición a `http://app:8080/`
-   (Docker resuelve el nombre `app` gracias a la red `cloudfgd`).
-3. `app` devuelve `html/index.html`. El HTML pide a su vez `/css/style.css` y `/js/app.js`,
-   que siguen el mismo camino.
-4. `app.js` hace `fetch("/api/messages")`, recibe un JSON con los últimos 50 mensajes y los
-   pinta en la página.
+1. El usuario escribe "trabajo autónomo", elige la fuente (o "Todas") y pulsa *Buscar*.
+2. `app.js` llama a `GET /api/search?q=trabajo autónomo&source=all`.
+3. La `app` lanza **una consulta por fuente en paralelo** (una goroutine por conector), cada una con
+   un tiempo máximo (`SEARCH_TIMEOUT`).
+4. Cada conector traduce la respuesta de su API al formato común `Result`
+   (fuente, identificador, título, resumen, fecha, enlace oficial y datos extra).
+5. La `app` devuelve todos los resultados juntos y, aparte, la lista de fuentes que fallaron.
+   Si una API externa no responde, **las demás se muestran igualmente**.
 
-**Enviar un mensaje**
+**Guardar**
 
-1. El usuario rellena el formulario y pulsa *Enviar*.
-2. `app.js` intercepta el envío y hace `POST /api/messages` con `{"author": "...", "content": "..."}`.
-3. `app` valida los datos, añade el mensaje y reescribe `/data/messages.json` de forma atómica.
-4. Responde `201 Created`; `app.js` limpia el formulario y recarga la lista.
+1. En un resultado, el usuario pulsa *Guardar*, escribe etiquetas y una nota, y confirma.
+2. `app.js` envía el resultado con las etiquetas y la nota a `POST /api/saved`.
+3. La `app` valida los datos (fuente conocida, enlace `http(s)`, longitudes, formato de fecha),
+   normaliza las etiquetas y lo añade a `/data/saved.json` con escritura atómica.
+4. Si ya estaba guardado (misma fuente e identificador), responde `409 Conflict`.
 
-Si el navegador tiene JavaScript desactivado, el formulario hace un `POST /messages` clásico,
-la `app` guarda el mensaje y redirige a `/` (patrón *Post/Redirect/Get*).
+**Consultar guardados**
+
+1. En la pestaña *Guardados*, cada cambio en los filtros llama a `GET /api/saved?source=&tag=&from=&to=`.
+2. La `app` filtra en memoria y devuelve la lista, del más reciente al más antiguo.
+3. *Borrar* llama a `DELETE /api/saved/{id}`.
 
 ---
 
 ## 4. El servicio `proxy`
 
-Sustituye a nginx. Está en `srcs/requirements/proxy/src/`.
+**Sin cambios** respecto a la versión anterior. Está en `srcs/requirements/proxy/src/`.
 
-### `main.go`
-
-- **Configuración por entorno:** lee `DOMAIN_NAME`, `UPSTREAM` (por defecto `http://app:8080`),
-  `CERT_DIR` y `PROXY_PORT` mediante la función auxiliar `env(clave, valorPorDefecto)`.
-- **TLS:** el `http.Server` se crea con `tls.Config{MinVersion: TLS12, MaxVersion: TLS13}`,
-  así que cualquier cliente que intente TLS 1.0/1.1 es rechazado en el *handshake*.
-- **Reverse proxy:** usa `httputil.ReverseProxy` con la función `Rewrite`:
-  - `SetURL(upstream)` cambia el destino a la `app`.
-  - `SetXForwarded()` añade `X-Forwarded-For`, `X-Forwarded-Host` y `X-Forwarded-Proto`,
-    para que la `app` conozca la IP y el protocolo originales.
-  - `ErrorHandler` devuelve `502 Bad Gateway` si la `app` no responde.
-- **Logs:** un pequeño *middleware* envuelve al proxy y escribe una línea por petición
-  (IP, método, ruta, duración), equivalente al `access_log` de nginx.
-- **Modo `-healthcheck`:** si el binario se lanza con este flag no arranca el servidor; hace
-  una petición a su propio `/healthz` y termina (ver [sección 8](#8-health-checks)).
-
-### `cert.go`
-
-`ensureCert()` comprueba si existe `/certs/server.crt`. Si no, genera:
-
-- una clave privada **ECDSA P-256**,
-- un certificado **X.509 autofirmado** válido 1 año con `CN` y `DNSNames` = `DOMAIN_NAME`,
-
-y los guarda en el volumen `/certs` (la clave con permisos `0600`). Como el volumen es persistente,
-el certificado se reutiliza en los siguientes arranques.
+- **`main.go`:** TLS 1.2/1.3, proxy inverso con `httputil.ReverseProxy`, cabeceras `X-Forwarded-*`,
+  `502 Bad Gateway` si la `app` no responde, una línea de log por petición y modo `-healthcheck`.
+- **`cert.go`:** genera un certificado autofirmado ECDSA P-256 la primera vez y lo guarda en `/certs`.
 
 ---
 
 ## 5. El servicio `app`
 
-Está en `srcs/requirements/app/src/` y se divide en cuatro ficheros Go:
+Está en `srcs/requirements/app/src/`. El detalle de cada ruta está en [docs/API.md](docs/API.md) y el
+de los conectores en [docs/CONECTORES.md](docs/CONECTORES.md).
 
 ### `main.go` — arranque y rutas
 
-- `//go:embed web` incrusta toda la carpeta del frontend **dentro del binario** en tiempo de
-  compilación. La imagen final no necesita copiar ficheros estáticos: solo el ejecutable.
-- `routes()` usa el enrutador de Go 1.22+ (`http.ServeMux` con método y patrón):
+- Lee la configuración del entorno (`APP_PORT`, `DATA_PATH`, `SEARCH_TIMEOUT` y, solo para pruebas,
+  `BOE_BASE_URL` y `DATOSGOB_BASE_URL`).
+- Crea los conectores y los registra en `App.sources`. **Añadir una fuente es añadir una línea aquí.**
+- Define las rutas:
 
   | Ruta | Handler | Qué hace |
   |------|---------|----------|
   | `GET /` | inline | Sirve `web/html/index.html` |
-  | `GET /css/…` | `http.FileServer` | Sirve ficheros de `web/css/` |
-  | `GET /js/…` | `http.FileServer` | Sirve ficheros de `web/js/` |
-  | `GET /api/messages` | `listMessages` | Devuelve los mensajes en JSON |
-  | `POST /api/messages` | `createMessageJSON` | Crea un mensaje desde JSON |
-  | `POST /messages` | `createMessageForm` | Crea un mensaje desde un formulario (sin JS) |
+  | `GET /css/…`, `GET /js/…` | `http.FileServer` | Ficheros estáticos |
+  | `GET /api/sources` | `listSources` | Fuentes disponibles |
+  | `GET /api/search` | `search` | Busca en una fuente o en todas |
+  | `GET /api/saved` | `listSaved` | Lista de guardados con filtros |
+  | `POST /api/saved` | `createSaved` | Guarda un elemento |
+  | `DELETE /api/saved/{id}` | `deleteSaved` | Borra un elemento |
   | `GET /healthz` | `healthz` | Estado del servicio |
 
-  El patrón `GET /{$}` solo coincide con `/` exacto, así que cualquier otra ruta desconocida
-  devuelve `404`.
-- `App` es una estructura que agrupa las dependencias (el `Store`) y a la que se cuelgan los
-  handlers como métodos. Así se evitan variables globales.
+### `sources/` — conectores
 
-### `store.go` — persistencia
+- `source.go` define la interfaz que cumple cada conector:
 
-- `Store` mantiene los mensajes en memoria (`[]Message`) y los guarda en `/data/messages.json`.
-- `NewStore()` carga el fichero al arrancar (si no existe, empieza vacío).
-- `Add()` escribe primero en `messages.json.tmp` y después hace `os.Rename`, que es una operación
-  **atómica**: si el contenedor se cae a mitad de escritura, el JSON nunca queda corrupto.
-- Un `sync.Mutex` protege el acceso, porque el servidor HTTP de Go atiende cada petición en una
-  goroutine distinta y podrían llegar escrituras simultáneas.
-- `Latest(n)` devuelve los `n` mensajes más recientes, del más nuevo al más antiguo.
-- `Writable()` crea y borra un fichero temporal en `/data` para comprobar que el volumen está
-  montado y admite escrituras (lo usa `/healthz`).
+  ```go
+  type Source interface {
+      Name() string  // "boe", "datosgob": se usa en ?source=
+      Label() string // nombre legible para el frontend
+      Search(ctx context.Context, query string, limit int) ([]Result, error)
+  }
+  ```
 
-### `handlers.go` — lógica HTTP
+- `boe.go` busca en la **legislación consolidada del BOE** por palabras del título, o por número
+  oficial si se escribe algo como `39/2015`.
+- `datosgob.go` busca **conjuntos de datos de datos.gob.es** por título, y entiende los distintos
+  formatos en que esa API devuelve un mismo campo (texto, objeto multiidioma o lista).
+- `search.go` (`SearchAll`) consulta varias fuentes en paralelo y separa resultados y errores.
 
-- `validate()` recorta espacios y comprueba que nombre y mensaje no estén vacíos y no superen
-  50 y 500 caracteres (se cuentan *runas*, no bytes, para que las tildes y emojis cuenten como uno).
-- `createMessageJSON()` limita el cuerpo a 4 KB (`http.MaxBytesReader`), decodifica el JSON y
-  responde con errores en formato `{"error": "..."}` que `app.js` muestra al usuario.
-- `healthz()` responde `200 ok` si `Store.Writable()` funciona y `503` si no.
+### `store.go` — guardados
 
-### `healthcheck.go`
+- Mismo diseño que tenía el libro de visitas: lista en memoria, `sync.Mutex` y escritura atómica
+  (fichero temporal + `os.Rename`), ahora en `/data/saved.json`.
+- Cada `SavedItem` es una copia ligera del resultado más `tags`, `note`, `id` y `saved_at`.
+- `List(Filter)` filtra por fuente, etiqueta y rango de fechas del documento.
 
-`runHealthcheck(url, insecure)` hace un `GET` con *timeout* de 3 s y devuelve `0` si la respuesta
-es `200` o `1` en cualquier otro caso: exactamente el código de salida que espera Docker.
-El mismo fichero está copiado en el `proxy`.
+### `handlers.go` — API REST
+
+- Valida todo lo que llega del navegador: longitudes, fechas `AAAA-MM-DD`, fuentes conocidas y
+  enlaces solo `http(s)` (así no se puede guardar un `javascript:` que luego se pinte en un enlace).
+- Normaliza las etiquetas: minúsculas, sin espacios sobrantes, sin repetidas, máximo 10.
+- Responde siempre JSON, con los errores en el formato `{"error": "..."}`.
+
+### Tests
+
+- `sources/sources_test.go`: cada conector se prueba contra un **servidor HTTP falso** (`httptest`)
+  que devuelve respuestas de ejemplo de `testdata/`. Comprueba la petición que se envía y cómo se
+  traduce la respuesta. No necesita Internet.
+- `handlers_test.go`: prueba la API completa (búsqueda, errores parciales, guardar, duplicados,
+  filtros, borrar, validaciones y que los datos sobreviven a un reinicio).
 
 ---
 
-## 6. El frontend: HTML, CSS y JavaScript
+## 6. El frontend
 
-Separado en tres carpetas dentro de `app/src/web/`:
+Separado en `web/html`, `web/css` y `web/js`, sin frameworks. Detalle completo en
+[docs/FRONTEND.md](docs/FRONTEND.md).
 
-### `html/index.html` — estructura
-- Carga `/css/style.css` y `/js/app.js` (con `defer`, para que el script se ejecute cuando el
-  DOM ya está listo).
-- Contiene el formulario, el contenedor `#messages` y un `<template id="message-template">`
-  con el molde de cada mensaje, que JavaScript clona.
-- El formulario tiene `action="/messages"` para funcionar también sin JavaScript.
-
-### `css/style.css` — presentación
-- Los colores se definen como variables en `:root` y se redefinen dentro de
-  `@media (prefers-color-scheme: dark)`: el **modo oscuro** es automático según el sistema.
-- Diseño de una columna centrada (máx. 640 px), usable en móvil.
-
-### `js/app.js` — comportamiento
-- `loadMessages()` → `fetch GET /api/messages` y llama a `render()`.
-- `render()` clona el `<template>` por cada mensaje y rellena los campos con **`textContent`**
-  (nunca `innerHTML`), de forma que un mensaje como `<script>…</script>` se muestra como texto
-  y no se ejecuta (protección contra XSS).
-- `sendMessage()` evita el envío clásico (`preventDefault`), manda el JSON con `fetch POST`,
-  deshabilita el botón mientras espera y muestra el resultado en `#status`.
-- `updateCounter()` actualiza el contador de caracteres mientras se escribe.
-- Las fechas se formatean con `Intl.DateTimeFormat("es-ES")`.
+- **Pestaña Buscar:** texto, selector de fuente y resultados en tarjetas con la fuente, la fecha,
+  el título y un resumen. Cada tarjeta tiene *Ver detalle*, *Guardar* (con etiquetas y nota) y el
+  enlace a la *Fuente oficial*. Si una fuente falla, aparece un aviso y se muestran las demás.
+- **Pestaña Guardados:** filtros por fuente, etiqueta y fechas; cada elemento muestra sus etiquetas,
+  su nota, la fecha en que se guardó y un botón para borrarlo.
+- Todo el texto se pinta con `textContent` (protección contra XSS) y solo se enlazan URLs `http(s)`.
+- Modo oscuro automático y diseño adaptado a móvil.
+- Pie de página con el aviso de que, para usos jurídicos, hay que consultar la publicación oficial.
 
 ---
 
@@ -238,32 +252,27 @@ Separado en tres carpetas dentro de `app/src/web/`:
 
 ### Dockerfiles (multi-stage)
 
-Los dos Dockerfiles siguen el mismo patrón:
-
 ```
-Etapa 1 (build):  alpine:3.23 + paquete go  →  go build  →  binario estático
-Etapa 2 (final):  alpine:3.23 limpia        →  solo se copia el binario
+Etapa build:  alpine:3.23 + paquete go  →  go build  →  binario estático
+Etapa test:   (solo con make test)      →  go vet + go test
+Etapa final:  alpine:3.23 + ca-certificates  →  solo se copia el binario
 ```
 
-- `CGO_ENABLED=0` genera un binario estático que no depende de librerías del sistema.
-- El compilador de Go **no** llega a la imagen final: las imágenes resultantes pesan unos pocos MB.
-- La `app` se ejecuta con un usuario sin privilegios (`USER app`).
-- `ENTRYPOINT` lanza el binario directamente, así que es el **PID 1** del contenedor y recibe
-  las señales de `docker stop` correctamente (sin scripts con `tail -f` ni bucles infinitos).
+- **Nuevo:** la imagen final de la `app` instala `ca-certificates`, necesario para que Go pueda
+  verificar los certificados HTTPS del BOE y de datos.gob.es.
+- **Nuevo:** la etapa `test` solo se ejecuta con `make test`; un `make` normal no pasa por ella.
+- La `app` se ejecuta con un usuario sin privilegios y el binario es el PID 1 del contenedor.
 
 ### `docker-compose.yml`
 
-- **Red** `cloudfgd` (bridge): los contenedores se comunican por nombre (`app`, `proxy`).
-- **Puertos:** solo `443:443` en el `proxy`.
-- **`depends_on` con `condition: service_healthy`:** el `proxy` no arranca hasta que la `app`
-  está *healthy*, así nunca recibe tráfico sin tener a quién reenviarlo.
-- **`restart: unless-stopped`:** si un contenedor se cae, Docker lo vuelve a levantar.
-- **Volúmenes** con `driver_opts` tipo *bind* hacia `~/data`:
+Sin cambios: red `cloudfgd`, solo el puerto 443 publicado, `depends_on` con `service_healthy`,
+`restart: unless-stopped` y volúmenes en `~/data`. Los contenedores pueden salir a Internet por
+defecto, así que no hace falta configurar nada para llegar a las APIs públicas.
 
-  | Volumen | Contenedor | Host | Contenido |
-  |---------|------------|------|-----------|
-  | `app_data`   | `/data`  | `~/data/app`   | `messages.json` |
-  | `certs_data` | `/certs` | `~/data/certs` | `server.crt`, `server.key` |
+| Volumen | Contenedor | Host | Contenido |
+|---------|------------|------|-----------|
+| `app_data`   | `/data`  | `~/data/app`   | `saved.json` (guardados) |
+| `certs_data` | `/certs` | `~/data/certs` | `server.crt`, `server.key` |
 
 ### `.env`
 
@@ -272,88 +281,76 @@ Etapa 2 (final):  alpine:3.23 limpia        →  solo se copia el binario
 | `DOMAIN_NAME` | `localhost` | CN del certificado |
 | `APP_PORT` | `8080` | Puerto interno de la `app` |
 | `UPSTREAM` | `http://app:8080` | Destino del `proxy` |
+| `SEARCH_TIMEOUT` | `10s` | **Nuevo.** Tiempo máximo de espera de cada API externa |
+| `BOE_BASE_URL`, `DATOSGOB_BASE_URL` | URLs oficiales | Opcionales, solo para apuntar a una API simulada en pruebas |
 
 ---
 
 ## 8. Health checks
 
-Cada Dockerfile define un `HEALTHCHECK` que ejecuta **el propio binario de Go** con el flag
-`-healthcheck`. Así no hace falta instalar `curl` ni `wget` en la imagen.
-
-```dockerfile
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/app", "-healthcheck"]
-```
+Sin cambios: cada Dockerfile tiene un `HEALTHCHECK` que ejecuta el propio binario con `-healthcheck`.
 
 | Servicio | Qué comprueba | Se marca *unhealthy* si… |
 |----------|---------------|--------------------------|
 | `app`   | `GET http://127.0.0.1:8080/healthz` | el servidor no responde o `/data` no es escribible |
-| `proxy` | `GET https://127.0.0.1:443/healthz` (a través del propio proxy) | falla el TLS, el proxy no responde **o** la `app` de detrás no está sana (502/503) |
+| `proxy` | `GET https://127.0.0.1:443/healthz` | falla el TLS, el proxy no responde o la `app` no está sana |
 
-El health check del `proxy` es de **extremo a extremo**: si pasa, toda la cadena
-TLS → proxy → app → disco funciona.
-
-Parámetros:
-- `interval=10s`: se comprueba cada 10 segundos.
-- `timeout=3s`: si tarda más, cuenta como fallo.
-- `start-period=5s`: margen de arranque en el que los fallos no cuentan.
-- `retries=3`: tras 3 fallos seguidos el contenedor pasa a `unhealthy`.
-
-Para ver el estado: `make health` o `make ps`.
+`/healthz` **no** consulta las APIs externas a propósito: si el BOE se cae, la aplicación sigue
+sana (puede seguir mostrando los guardados y buscando en las demás fuentes).
 
 ---
 
 ## 9. Uso y comandos del Makefile
 
-Requisitos: Docker con el plugin `docker compose` y `make`.
+Requisitos: Docker con el plugin `docker compose`, `make` y conexión a Internet (para las APIs públicas).
 
 ```sh
 make            # crea ~/data/{app,certs}, construye las imágenes y levanta los servicios
 ```
 
-Abre **https://localhost**. El certificado es autofirmado, así que el navegador mostrará un
-aviso de seguridad: acéptalo para continuar.
+Abre **https://localhost**. El certificado es autofirmado, así que el navegador mostrará un aviso.
 
 | Comando | Qué hace |
 |---------|----------|
 | `make` / `make up` | Construye y arranca en segundo plano |
 | `make down` | Para y elimina los contenedores (los datos se conservan) |
-| `make stop` / `make start` | Pausa / reanuda los contenedores sin eliminarlos |
-| `make logs` | Muestra los logs en directo |
-| `make ps` | Lista los contenedores y su estado |
-| `make health` | Muestra el estado del health check de cada contenedor |
+| `make stop` / `make start` | Pausa / reanuda los contenedores |
+| `make logs` | Logs en directo (incluye qué fuente falla y por qué) |
+| `make ps` | Contenedores y su estado |
+| `make health` | Estado del health check de cada contenedor |
+| `make test` | **Nuevo.** `go vet` y tests de la `app` dentro de Docker (no hace falta Go instalado) |
 | `make clean` | `down` + `docker system prune -af` |
 | `make fclean` | Elimina contenedores, volúmenes, imágenes **y los datos de `~/data`** |
 | `make re` | `fclean` + `all` |
 
-**Usar un dominio propio** (`[nombre del dominio].es,.com,.org,.net,etc...`):
+Con Go instalado también se pueden lanzar los tests directamente:
 
-1. Cambia `DOMAIN_NAME` en `srcs/.env`.
-2. Añade `127.0.0.1 [nombre del dominio].*` a `/etc/hosts`.
-3. Borra `~/data/certs` para que se genere un certificado nuevo y ejecuta `make re`.
+```sh
+cd srcs/requirements/app/src && go test ./...
+```
 
 ---
 
 ## 10. API
 
+Resumen de la API REST propia. La referencia completa, con ejemplos de respuesta y todos los
+errores, está en [docs/API.md](docs/API.md).
+
 ```sh
-# Listar mensajes
-curl -k https://localhost/api/messages
-
-# Crear un mensaje
-curl -k -H 'Content-Type: application/json' \
-     -d '{"author":"Dani","content":"Hola"}' https://localhost/api/messages
-
-# Estado
-curl -k https://localhost/healthz
+curl -k https://localhost/api/sources
+curl -k "https://localhost/api/search?q=trabajo%20aut%C3%B3nomo&source=boe"
+curl -k https://localhost/api/saved
+curl -k -X DELETE https://localhost/api/saved/<id>
 ```
 
 | Método | Ruta | Respuesta |
 |--------|------|-----------|
-| `GET`  | `/api/messages` | `200` + array JSON `[{author, content, created_at}]` |
-| `POST` | `/api/messages` | `201` + el mensaje creado · `400` + `{"error": "..."}` |
-| `POST` | `/messages` | `303` redirección a `/` · `400` si los datos no son válidos |
-| `GET`  | `/healthz` | `200 ok` · `503` si el volumen no es escribible |
+| `GET` | `/api/sources` | `200` + lista de fuentes `[{name, label}]` |
+| `GET` | `/api/search?q=&source=&limit=` | `200` + `{query, results, errors}` · `400` parámetros no válidos · `502` si fallan todas las fuentes |
+| `GET` | `/api/saved?source=&tag=&from=&to=` | `200` + lista de guardados · `400` filtros no válidos |
+| `POST` | `/api/saved` | `201` + elemento creado · `400` datos no válidos · `409` ya guardado |
+| `DELETE` | `/api/saved/{id}` | `204` · `404` si no existe |
+| `GET` | `/healthz` | `200 ok` · `503` si el volumen no es escribible |
 
 ---
 
@@ -361,12 +358,21 @@ curl -k https://localhost/healthz
 
 - **`proxy` no arranca / se queda en `Created`:** espera a que la `app` esté *healthy*.
   Revisa `make logs` y `make health`.
-- **`app` en estado `unhealthy`:** normalmente el volumen `~/data/app` no existe o no tiene
-  permisos de escritura. Ejecuta `make` (que crea las carpetas) o revisa los permisos.
-- **`502 Bad Gateway`:** el `proxy` no llega a la `app`. Comprueba que ambos contenedores
-  están en la red `cloudfgd` (`docker network inspect srcs_cloudfgd`).
-- **Error de volumen al arrancar (`no such file or directory`):** las carpetas de `~/data` deben
-  existir antes de `docker compose up`; usa siempre `make` en lugar de llamar a compose directamente.
+- **`app` en estado `unhealthy`:** el volumen `~/data/app` no existe o no tiene permisos de
+  escritura. Ejecuta `make` (que crea las carpetas) o revisa los permisos.
+- **Aviso "la fuente tardó demasiado en responder":** la API externa va lenta. Vuelve a intentarlo
+  más tarde, o sube `SEARCH_TIMEOUT` en `srcs/.env` (por ejemplo, `20s`) y ejecuta
+  `make down && make` (no uses `make re`, que borra los guardados).
+- **Aviso "la fuente externa no respondió correctamente":** la API devolvió un error. `make logs`
+  muestra el código HTTP. Si es `400` en el BOE, la consulta tenía una sintaxis que la API no admite.
+- **Todas las búsquedas fallan:** el contenedor no tiene salida a Internet o no resuelve DNS.
+  Comprueba la resolución con `docker exec app nslookup www.boe.es` y mira el error exacto en `make logs`.
+- **Error de certificado al llamar a las APIs (`x509: certificate signed by unknown authority`):**
+  falta `ca-certificates` en la imagen; reconstruye con `make re`.
+- **`502 Bad Gateway` en todas las páginas:** el `proxy` no llega a la `app`. Comprueba que ambos
+  contenedores están en la red `cloudfgd` (`docker network inspect srcs_cloudfgd`).
+- **Los mensajes del libro de visitas han desaparecido:** la versión actual ya no los usa; el
+  fichero antiguo `~/data/app/messages.json` sigue en disco y se puede borrar.
 - **Aviso de certificado en el navegador:** es normal, el certificado es autofirmado.
 
 ---
@@ -374,7 +380,7 @@ curl -k https://localhost/healthz
 ## 12. Documentación de las herramientas
 
 Esta sección recoge la documentación oficial de cada herramienta que usa el proyecto, **ordenada
-según el flujo de trabajo**: desde que se ejecuta `make` hasta que el navegador muestra un mensaje.
+según el flujo de trabajo**: desde que se ejecuta `make` hasta que el navegador muestra un resultado.
 No hace falta leerlo todo; cada tabla indica *para qué* se usa esa pieza en CloudFGD, así que
 puedes ir directamente a la parte que no entiendas.
 
@@ -413,7 +419,7 @@ puedes ir directamente a la parte que no entiendas.
 | Servicios | Definición de `app` y `proxy` en `docker-compose.yml` | [Services](https://docs.docker.com/reference/compose-file/services/) |
 | `depends_on` | El `proxy` espera a que la `app` esté *healthy* | [depends_on](https://docs.docker.com/reference/compose-file/services/#depends_on) |
 | Redes | Red `cloudfgd` para que los servicios se encuentren por nombre | [Networking in Compose](https://docs.docker.com/compose/how-tos/networking/) |
-| Volúmenes | Persistencia de `messages.json` y del certificado | [Volumes](https://docs.docker.com/engine/storage/volumes/) · [Bind mounts](https://docs.docker.com/engine/storage/bind-mounts/) |
+| Volúmenes | Persistencia de `saved.json` y del certificado | [Volumes](https://docs.docker.com/engine/storage/volumes/) · [Bind mounts](https://docs.docker.com/engine/storage/bind-mounts/) |
 | Variables y `.env` | `--env-file srcs/.env` y `${DATA_DIR}` en el compose | [Variables e interpolación](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/) |
 | `restart` | `unless-stopped`: reinicio automático si un contenedor cae | [Restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/) |
 
@@ -443,9 +449,9 @@ puedes ir directamente a la parte que no entiendas.
 | Concepto / paquete | Para qué se usa aquí | Documentación |
 |--------------------|----------------------|---------------|
 | `net/http` | Servidor HTTP, rutas y handlers | [pkg.go.dev/net/http](https://pkg.go.dev/net/http) · [Go by Example: HTTP server](https://gobyexample.com/http-server) |
-| Rutas con método (Go 1.22+) | Patrones como `GET /api/messages` y `GET /{$}` | [Routing enhancements (blog de Go)](https://go.dev/blog/routing-enhancements) |
+| Rutas con método (Go 1.22+) | Patrones como `DELETE /api/saved/{id}` y `GET /{$}` | [Routing enhancements (blog de Go)](https://go.dev/blog/routing-enhancements) |
 | `embed` | Incrustar la carpeta `web/` dentro del binario | [pkg.go.dev/embed](https://pkg.go.dev/embed) · [Go by Example: embed](https://gobyexample.com/embed-directive) |
-| `encoding/json` | Leer y escribir `messages.json` y la API | [pkg.go.dev/encoding/json](https://pkg.go.dev/encoding/json) · [Go by Example: JSON](https://gobyexample.com/json) |
+| `encoding/json` | Leer y escribir `saved.json` , la API propia y las respuestas de las APIs públicas | [pkg.go.dev/encoding/json](https://pkg.go.dev/encoding/json) · [Go by Example: JSON](https://gobyexample.com/json) |
 | `sync.Mutex` | Evitar que dos escrituras simultáneas se pisen | [sync.Mutex](https://pkg.go.dev/sync#Mutex) · [Go by Example: mutexes](https://gobyexample.com/mutexes) |
 | `os.Rename` | Escritura atómica del fichero de datos | [os.Rename](https://pkg.go.dev/os#Rename) |
 | Formato JSON | Formato de los datos guardados y de la API | [json.org (español)](https://www.json.org/json-es.html) |
@@ -455,10 +461,10 @@ puedes ir directamente a la parte que no entiendas.
 | Concepto | Para qué se usa aquí | Documentación (MDN) |
 |----------|----------------------|---------------------|
 | HTML | Estructura de `index.html` | [HTML](https://developer.mozilla.org/es/docs/Web/HTML) |
-| `<template>` | Molde de cada mensaje que clona `app.js` | [`<template>`](https://developer.mozilla.org/es/docs/Web/HTML/Element/template) |
+| `<template>` | Molde de cada resultado y de cada guardado que clona `app.js` | [`<template>`](https://developer.mozilla.org/es/docs/Web/HTML/Element/template) |
 | Variables CSS | Colores definidos en `:root` | [Propiedades personalizadas](https://developer.mozilla.org/es/docs/Web/CSS/Using_CSS_custom_properties) |
 | `prefers-color-scheme` | Modo oscuro automático | [prefers-color-scheme](https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-color-scheme) (inglés) |
-| Fetch API | Pedir y enviar mensajes a la API sin recargar | [Uso de Fetch](https://developer.mozilla.org/es/docs/Web/API/Fetch_API/Using_Fetch) |
+| Fetch API | Buscar, guardar y borrar sin recargar la página | [Uso de Fetch](https://developer.mozilla.org/es/docs/Web/API/Fetch_API/Using_Fetch) |
 | `textContent` | Pintar texto de forma segura (sin ejecutar HTML) | [Node.textContent](https://developer.mozilla.org/es/docs/Web/API/Node/textContent) |
 | `Intl.DateTimeFormat` | Formato de las fechas en español | [Intl.DateTimeFormat](https://developer.mozilla.org/es/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat) |
 
@@ -466,9 +472,8 @@ puedes ir directamente a la parte que no entiendas.
 
 | Concepto | Dónde aparece en el proyecto | Documentación |
 |----------|------------------------------|---------------|
-| Códigos de estado HTTP | `200`, `201`, `303`, `400`, `502`, `503` de la API y el proxy | [Códigos de estado HTTP (MDN)](https://developer.mozilla.org/es/docs/Web/HTTP/Status) |
+| Códigos de estado HTTP | `200`, `201`, `204`, `400`, `404`, `409`, `502`, `503` de la API y el proxy | [Códigos de estado HTTP (MDN)](https://developer.mozilla.org/es/docs/Web/HTTP/Status) |
 | XSS | Por qué el frontend usa `textContent` y no `innerHTML` | [OWASP XSS Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html) (inglés) |
-| Post/Redirect/Get | El formulario sin JavaScript (`POST /messages` → `303` → `/`) | [Post/Redirect/Get (Wikipedia)](https://en.wikipedia.org/wiki/Post/Redirect/Get) (inglés) |
 
 ### 12.9 Orden de lectura recomendado
 
@@ -483,3 +488,24 @@ Si partes de cero, este recorrido sigue el mismo camino que el proyecto:
 7. **encoding/json** + **sync.Mutex** → leer `store.go`.
 8. **Qué es TLS** + **Proxy inverso** → leer `proxy/src/main.go` y `cert.go`.
 9. **MDN: Fetch, template y textContent** → leer `web/js/app.js`.
+10. **Interfaces, http.Client y WaitGroups** (12.11) + **docs/CONECTORES.md** → leer `sources/`.
+11. **testing y httptest** → leer `sources/sources_test.go` y `handlers_test.go`.
+
+### 12.10 APIs públicas que consulta la app
+
+| Fuente | Para qué se usa aquí | Documentación |
+|--------|----------------------|---------------|
+| BOE · Legislación consolidada | Conector `sources/boe.go` | [Datos abiertos del BOE](https://www.boe.es/datosabiertos/api/api.php) · [Manual de la API (PDF)](https://www.boe.es/datosabiertos/documentos/APIconsolidada.pdf) |
+| datos.gob.es · apidata | Conector `sources/datosgob.go` | [API de datos.gob.es](https://datos.gob.es/en/accessible-apidata) |
+| INE · Tempus3 (candidata) | Posible tercera fuente | [API JSON del INE](https://www.ine.es/dyngs/DAB/index.htm?cid=1100) |
+
+### 12.11 Go: llamadas HTTP, concurrencia y tests
+
+| Concepto / paquete | Para qué se usa aquí | Documentación |
+|--------------------|----------------------|---------------|
+| `http.Client` y `context` | Llamar a las APIs con tiempo máximo de espera | [net/http Client](https://pkg.go.dev/net/http#Client) · [context](https://pkg.go.dev/context) |
+| `net/url` | Construir y codificar las URLs de las APIs | [pkg.go.dev/net/url](https://pkg.go.dev/net/url) |
+| Goroutines y `sync.WaitGroup` | Consultar varias fuentes a la vez (`SearchAll`) | [Go by Example: WaitGroups](https://gobyexample.com/waitgroups) |
+| Interfaces | El contrato `Source` que cumple cada conector | [Go by Example: interfaces](https://gobyexample.com/interfaces) |
+| `json.RawMessage` | Leer campos que cambian de formato según la respuesta | [encoding/json RawMessage](https://pkg.go.dev/encoding/json#RawMessage) |
+| `testing` y `httptest` | Tests sin red, con APIs simuladas | [pkg.go.dev/testing](https://pkg.go.dev/testing) · [net/http/httptest](https://pkg.go.dev/net/http/httptest) |

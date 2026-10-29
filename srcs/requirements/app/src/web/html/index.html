@@ -3,42 +3,114 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CloudFGD · Libro de visitas</title>
+  <title>CloudFGD · Archivador de información pública</title>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/app.js" defer></script>
 </head>
 <body>
   <main class="container">
-    <header>
-      <h1>Libro de visitas</h1>
-      <p class="sub">Go + Docker · proxy TLS y app en contenedores separados</p>
+    <header class="top">
+      <h1>CloudFGD</h1>
+      <p class="sub">Busca en fuentes públicas y guarda lo que quieras seguir</p>
     </header>
 
-    <form id="message-form" method="post" action="/messages">
-      <input id="author" name="author" placeholder="Tu nombre" maxlength="50" required>
-      <textarea id="content" name="content" placeholder="Tu mensaje" rows="3" maxlength="500" required></textarea>
-      <div class="form-footer">
-        <span id="counter" class="counter">0 / 500</span>
-        <button type="submit">Enviar</button>
-      </div>
-      <p id="status" class="status" role="status" aria-live="polite"></p>
-    </form>
+    <noscript><p class="status error">Esta aplicación necesita JavaScript.</p></noscript>
 
-    <section>
-      <h2>Mensajes <span id="total" class="badge"></span></h2>
-      <div id="messages">
-        <p class="empty">Cargando mensajes…</p>
-      </div>
+    <nav class="tabs" role="tablist">
+      <button id="tab-search" role="tab" aria-selected="true" aria-controls="panel-search">Buscar</button>
+      <button id="tab-saved" role="tab" aria-selected="false" aria-controls="panel-saved">
+        Guardados <span id="saved-count" class="count">0</span>
+      </button>
+    </nav>
+
+    <!-- Buscador -->
+    <section id="panel-search" role="tabpanel" aria-labelledby="tab-search">
+      <form id="search-form" class="panel search-form">
+        <input id="q" type="search" name="q" maxlength="100" required
+               placeholder="Ej.: trabajo autónomo, 39/2015, paro registrado" aria-label="Texto a buscar">
+        <select id="source" name="source" aria-label="Fuente">
+          <option value="all">Todas las fuentes</option>
+        </select>
+        <button type="submit">Buscar</button>
+      </form>
+      <p id="search-status" class="status" role="status" aria-live="polite"></p>
+      <div id="source-errors"></div>
+      <div id="results"></div>
     </section>
+
+    <!-- Lista de guardados -->
+    <section id="panel-saved" role="tabpanel" aria-labelledby="tab-saved" hidden>
+      <form id="filter-form" class="panel filters">
+        <label>Fuente
+          <select id="f-source" name="source"><option value="">Todas</option></select>
+        </label>
+        <label>Etiqueta
+          <select id="f-tag" name="tag"><option value="">Todas</option></select>
+        </label>
+        <label>Desde
+          <input id="f-from" type="date" name="from">
+        </label>
+        <label>Hasta
+          <input id="f-to" type="date" name="to">
+        </label>
+        <button type="reset" class="secondary">Quitar filtros</button>
+      </form>
+      <p id="saved-status" class="status" role="status" aria-live="polite"></p>
+      <div id="saved-list"></div>
+    </section>
+
+    <footer class="legal">
+      La información procede de fuentes oficiales (BOE, datos.gob.es). CloudFGD guarda solo una copia
+      ligera: para cualquier uso jurídico consulta siempre la publicación oficial enlazada.
+    </footer>
   </main>
 
-  <template id="message-template">
-    <article class="msg">
-      <header>
-        <strong class="msg-author"></strong>
-        <time class="msg-date"></time>
+  <!-- Molde de un resultado de búsqueda -->
+  <template id="result-template">
+    <article class="card">
+      <header class="card-head">
+        <span class="badge"></span>
+        <time class="date"></time>
       </header>
-      <p class="msg-content"></p>
+      <h3 class="title"></h3>
+      <p class="summary"></p>
+      <dl class="detail" hidden></dl>
+      <div class="actions">
+        <button type="button" class="secondary btn-detail" aria-expanded="false">Ver detalle</button>
+        <button type="button" class="btn-save">Guardar</button>
+        <a class="official" target="_blank" rel="noopener noreferrer">Fuente oficial ↗</a>
+      </div>
+      <form class="save-form" hidden>
+        <label>Etiquetas
+          <input name="tags" maxlength="200" placeholder="separadas por comas: autónomos, empleo">
+        </label>
+        <label>Nota personal
+          <textarea name="note" rows="2" maxlength="1000"></textarea>
+        </label>
+        <div class="actions">
+          <button type="submit">Confirmar</button>
+          <button type="button" class="secondary btn-cancel">Cancelar</button>
+        </div>
+      </form>
+    </article>
+  </template>
+
+  <!-- Molde de un elemento guardado -->
+  <template id="saved-template">
+    <article class="card">
+      <header class="card-head">
+        <span class="badge"></span>
+        <time class="date"></time>
+      </header>
+      <h3 class="title"></h3>
+      <p class="summary"></p>
+      <ul class="tags"></ul>
+      <p class="note"></p>
+      <div class="actions">
+        <a class="official" target="_blank" rel="noopener noreferrer">Fuente oficial ↗</a>
+        <span class="saved-at"></span>
+        <button type="button" class="danger btn-delete">Borrar</button>
+      </div>
     </article>
   </template>
 </body>

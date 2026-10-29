@@ -1,0 +1,53 @@
+{
+    "status": {
+        "code": "200",
+        "text": "ok"
+    },
+    "data": [
+        {
+            "fecha_actualizacion": "20260915T101500Z",
+            "identificador": "BOE-A-2007-13409",
+            "ambito": {
+                "codigo": "1",
+                "texto": "Estatal"
+            },
+            "departamento": {
+                "codigo": "7723",
+                "texto": "Jefatura del Estado"
+            },
+            "rango": {
+                "codigo": "1300",
+                "texto": "Ley"
+            },
+            "fecha_disposicion": "20070711",
+            "numero_oficial": "20\/2007",
+            "titulo": "Ley 20\/2007, de 11 de julio, del Estatuto del trabajo autónomo.",
+            "diario": "Boletín Oficial del Estado",
+            "fecha_publicacion": "20070712",
+            "diario_numero": "166",
+            "fecha_vigencia": "20071012",
+            "vigencia_agotada": "N",
+            "estado_consolidacion": {
+                "codigo": "3",
+                "texto": "Finalizado"
+            },
+            "url_eli": "https:\/\/www.boe.es\/eli\/es\/l\/2007\/07\/11\/20",
+            "url_html_consolidada": "https:\/\/www.boe.es\/buscar\/act.php?id=BOE-A-2007-13409"
+        },
+        {
+            "fecha_actualizacion": "20200101T000000Z",
+            "identificador": "BOE-A-1999-00001",
+            "departamento": {
+                "codigo": "9999",
+                "texto": "Ministerio de Ejemplo"
+            },
+            "rango": {
+                "codigo": "1340",
+                "texto": "Real Decreto"
+            },
+            "titulo": "Real Decreto de ejemplo sin enlace HTML.",
+            "fecha_publicacion": "19990105",
+            "vigencia_agotada": "S"
+        }
+    ]
+}

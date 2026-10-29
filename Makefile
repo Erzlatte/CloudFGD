@@ -28,6 +28,10 @@ health:
 		printf "%-6s %s\n" $$c "$$(docker inspect -f '{{.State.Health.Status}}' $$c 2>/dev/null || echo 'no existe')"; \
 	done
 
+# Ejecuta go vet y los tests de la app dentro de Docker (no hace falta tener Go instalado)
+test:
+	@docker build --target test -t app-go-fgd-test srcs/requirements/app
+
 clean: down
 	@docker system prune -af
 
@@ -37,4 +41,4 @@ fclean: down
 
 re: fclean all
 
-.PHONY: all up down stop start logs ps health clean fclean re
+.PHONY: all up down stop start logs ps health test clean fclean re

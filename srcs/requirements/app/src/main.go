@@ -1,4 +1,5 @@
-// App del libro de visitas: sirve el frontend (html/css/js) y una API JSON.
+// App de CloudFGD: sirve el frontend y la API REST propia, que consulta
+// APIs públicas (BOE, datos.gob.es) y guarda los elementos de interés.
 package main
 
 import (
@@ -10,17 +11,20 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"CloudFGD/app/sources"
 )
 
-// El frontend se incrusta dentro del binario en tiempo de compilación,
-// así la imagen final solo necesita el ejecutable.
+// El frontend se incrusta dentro del binario en tiempo de compilación.
 //
 //go:embed web
 var webFS embed.FS
 
 // App agrupa las dependencias que usan los handlers.
 type App struct {
-	store *Store
+	store         *Store
+	sources       []sources.Source
+	searchTimeout time.Duration
 }
 
 func env(key, def string) string {
@@ -30,7 +34,6 @@ func env(key, def string) string {
 	return def
 }
 
-// routes define todas las rutas HTTP de la aplicación.
 func (a *App) routes() http.Handler {
 	web, err := fs.Sub(webFS, "web")
 	if err != nil {
@@ -44,13 +47,15 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, web, "html/index.html")
 	})
-	mux.Handle("GET /css/", static) // /css/style.css -> web/css/style.css
-	mux.Handle("GET /js/", static)  // /js/app.js     -> web/js/app.js
+	mux.Handle("GET /css/", static)
+	mux.Handle("GET /js/", static)
 
-	// API
-	mux.HandleFunc("GET /api/messages", a.listMessages)
-	mux.HandleFunc("POST /api/messages", a.createMessageJSON)
-	mux.HandleFunc("POST /messages", a.createMessageForm)
+	// API REST
+	mux.HandleFunc("GET /api/sources", a.listSources)
+	mux.HandleFunc("GET /api/search", a.search)
+	mux.HandleFunc("GET /api/saved", a.listSaved)
+	mux.HandleFunc("POST /api/saved", a.createSaved)
+	mux.HandleFunc("DELETE /api/saved/{id}", a.deleteSaved)
 
 	// Salud del servicio (lo usa el HEALTHCHECK de Docker)
 	mux.HandleFunc("GET /healthz", a.healthz)
@@ -61,20 +66,35 @@ func (a *App) routes() http.Handler {
 func main() {
 	port := env("APP_PORT", "8080")
 
-	// Modo healthcheck: el propio binario hace la comprobación y termina
-	// con código 0 (sano) o 1 (no sano). Docker lo ejecuta dentro del contenedor.
 	check := flag.Bool("healthcheck", false, "comprueba /healthz y sale")
 	flag.Parse()
 	if *check {
 		os.Exit(runHealthcheck("http://127.0.0.1:"+port+"/healthz", false))
 	}
 
+	timeout, err := time.ParseDuration(env("SEARCH_TIMEOUT", "10s"))
+	if err != nil {
+		log.Fatalf("SEARCH_TIMEOUT no válido: %v", err)
+	}
+
 	dataDir := env("DATA_PATH", "/data")
-	store, err := NewStore(filepath.Join(dataDir, "messages.json"))
+	store, err := NewStore(filepath.Join(dataDir, "saved.json"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	app := &App{store: store}
+
+	// Para añadir una fuente nueva basta con crear su conector y añadirlo aquí.
+	boe := sources.NewBOE(timeout)
+	datosgob := sources.NewDatosGob(timeout)
+	// Opcional: apuntar a otra URL (por ejemplo, una API simulada para pruebas).
+	boe.BaseURL = env("BOE_BASE_URL", boe.BaseURL)
+	datosgob.BaseURL = env("DATOSGOB_BASE_URL", datosgob.BaseURL)
+
+	app := &App{
+		store:         store,
+		searchTimeout: timeout,
+		sources:       []sources.Source{boe, datosgob},
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + port,

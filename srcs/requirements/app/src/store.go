@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,49 +12,63 @@ import (
 	"time"
 )
 
-// Message es un mensaje del libro de visitas.
-type Message struct {
-	Author    string    `json:"author"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
+// SavedItem es un elemento de interés que el usuario ha guardado:
+// una copia ligera del resultado de búsqueda, más sus etiquetas y su nota.
+type SavedItem struct {
+	ID         string            `json:"id"`
+	Source     string            `json:"source"`
+	ExternalID string            `json:"external_id"`
+	Title      string            `json:"title"`
+	Summary    string            `json:"summary"`
+	Date       string            `json:"date"`
+	URL        string            `json:"url"`
+	Extra      map[string]string `json:"extra,omitempty"`
+	Tags       []string          `json:"tags"`
+	Note       string            `json:"note"`
+	SavedAt    time.Time         `json:"saved_at"`
 }
 
-// Store guarda los mensajes en memoria y los persiste en un fichero JSON
-// dentro del volumen de Docker. Un mutex protege el acceso concurrente,
-// ya que el servidor HTTP atiende cada petición en su propia goroutine.
+// Filter son los filtros de la lista de guardados. Los campos vacíos no filtran.
+type Filter struct {
+	Source string
+	Tag    string
+	From   string // AAAA-MM-DD, sobre la fecha del documento
+	To     string
+}
+
+var (
+	ErrDuplicate = errors.New("el elemento ya está guardado")
+	ErrNotFound  = errors.New("el elemento no existe")
+)
+
+// Store guarda los elementos en memoria y los persiste en un fichero JSON.
+// Mismo diseño que el libro de visitas: mutex + escritura atómica.
 type Store struct {
-	mu   sync.Mutex
-	path string
-	msgs []Message
+	mu    sync.Mutex
+	path  string
+	items []SavedItem // en orden de guardado (el más antiguo primero)
 }
 
-// NewStore carga los mensajes existentes (si el fichero ya existe).
 func NewStore(path string) (*Store, error) {
 	s := &Store{path: path}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return s, nil // primera ejecución: no hay datos todavía
+		return s, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	if len(data) > 0 {
-		if err := json.Unmarshal(data, &s.msgs); err != nil {
+		if err := json.Unmarshal(data, &s.items); err != nil {
 			return nil, fmt.Errorf("fichero de datos corrupto: %w", err)
 		}
 	}
 	return s, nil
 }
 
-// Add añade un mensaje y lo escribe en disco de forma atómica
-// (fichero temporal + rename), así un corte a mitad de escritura
-// nunca deja el JSON a medias.
-func (s *Store) Add(m Message) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	msgs := append(s.msgs, m)
-	data, err := json.MarshalIndent(msgs, "", "  ")
+// persist escribe la lista completa en disco (fichero temporal + rename).
+func (s *Store) persist(items []SavedItem) error {
+	data, err := json.MarshalIndent(items, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -60,27 +76,104 @@ func (s *Store) Add(m Message) error {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		return err
-	}
-	s.msgs = msgs
-	return nil
+	return os.Rename(tmp, s.path)
 }
 
-// Latest devuelve los últimos n mensajes, del más reciente al más antiguo.
-func (s *Store) Latest(n int) []Message {
+// Add guarda un elemento nuevo. Si ya existe uno de la misma fuente con el mismo
+// identificador externo, devuelve ErrDuplicate junto con el que ya estaba.
+func (s *Store) Add(it SavedItem) (SavedItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Message, 0, n)
-	for i := len(s.msgs) - 1; i >= 0 && len(out) < n; i-- {
-		out = append(out, s.msgs[i])
+
+	for _, old := range s.items {
+		if old.Source == it.Source && old.ExternalID == it.ExternalID {
+			return old, ErrDuplicate
+		}
+	}
+	id, err := newID()
+	if err != nil {
+		return SavedItem{}, err
+	}
+	it.ID = id
+	it.SavedAt = time.Now().UTC().Truncate(time.Second)
+
+	items := append(append([]SavedItem{}, s.items...), it)
+	if err := s.persist(items); err != nil {
+		return SavedItem{}, err
+	}
+	s.items = items
+	return it, nil
+}
+
+func (s *Store) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, it := range s.items {
+		if it.ID == id {
+			items := append(append([]SavedItem{}, s.items[:i]...), s.items[i+1:]...)
+			if err := s.persist(items); err != nil {
+				return err
+			}
+			s.items = items
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+// List devuelve los elementos que cumplen el filtro, del más reciente al más antiguo.
+func (s *Store) List(f Filter) []SavedItem {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := []SavedItem{}
+	for i := len(s.items) - 1; i >= 0; i-- {
+		if f.matches(s.items[i]) {
+			out = append(out, s.items[i])
+		}
 	}
 	return out
 }
 
-// Writable comprueba que el directorio de datos admite escrituras.
-// Lo usa /healthz: si el volumen no está montado o es de solo lectura,
-// el contenedor se marca como "unhealthy".
+func (f Filter) matches(it SavedItem) bool {
+	if f.Source != "" && it.Source != f.Source {
+		return false
+	}
+	if f.Tag != "" && !contains(it.Tags, f.Tag) {
+		return false
+	}
+	// Las fechas AAAA-MM-DD se pueden comparar como texto.
+	if (f.From != "" || f.To != "") && it.Date == "" {
+		return false
+	}
+	if f.From != "" && it.Date < f.From {
+		return false
+	}
+	if f.To != "" && it.Date > f.To {
+		return false
+	}
+	return true
+}
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func newID() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// Writable comprueba que el volumen de datos admite escrituras (lo usa /healthz).
 func (s *Store) Writable() error {
 	f, err := os.CreateTemp(filepath.Dir(s.path), ".healthcheck-*")
 	if err != nil {
