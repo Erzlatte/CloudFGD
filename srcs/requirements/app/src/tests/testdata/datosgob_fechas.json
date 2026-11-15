@@ -1,0 +1,21 @@
+{
+  "result": {
+    "items": [
+      {
+        "_about": "https://datos.gob.es/catalogo/fecha-en-espanol",
+        "title": "Fecha con día y mes en español",
+        "modified": "mié, 15 oct 2026 08:30:00 GMT"
+      },
+      {
+        "_about": "https://datos.gob.es/catalogo/fecha-no-valida",
+        "title": "Fecha que no se puede interpretar",
+        "modified": "no es una fecha"
+      },
+      {
+        "_about": "https://datos.gob.es/catalogo/solo-issued",
+        "title": "Sin modified, se usa issued",
+        "issued": "2019-03-01T00:00:00Z"
+      }
+    ]
+  }
+}

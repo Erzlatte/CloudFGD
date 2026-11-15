@@ -8,9 +8,6 @@ import (
 	"time"
 )
 
-// runHealthcheck hace una petición GET a url y devuelve el código de salida
-// que espera Docker: 0 = healthy, 1 = unhealthy.
-// insecure permite certificados autofirmados (solo para el proxy).
 func runHealthcheck(url string, insecure bool) int {
 	client := &http.Client{
 		Timeout: 3 * time.Second,

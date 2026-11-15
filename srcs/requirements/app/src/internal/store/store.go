@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"crypto/rand"
@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-// SavedItem es un elemento de interés que el usuario ha guardado:
-// una copia ligera del resultado de búsqueda, más sus etiquetas y su nota.
 type SavedItem struct {
 	ID         string            `json:"id"`
 	Source     string            `json:"source"`
@@ -28,11 +26,10 @@ type SavedItem struct {
 	SavedAt    time.Time         `json:"saved_at"`
 }
 
-// Filter son los filtros de la lista de guardados. Los campos vacíos no filtran.
 type Filter struct {
 	Source string
 	Tag    string
-	From   string // AAAA-MM-DD, sobre la fecha del documento
+	From   string
 	To     string
 }
 
@@ -41,16 +38,15 @@ var (
 	ErrNotFound  = errors.New("el elemento no existe")
 )
 
-// Store guarda los elementos en memoria y los persiste en un fichero JSON.
-// Mismo diseño que el libro de visitas: mutex + escritura atómica.
 type Store struct {
 	mu    sync.Mutex
 	path  string
-	items []SavedItem // en orden de guardado (el más antiguo primero)
+	items []SavedItem
 }
 
-func NewStore(path string) (*Store, error) {
+func New(path string) (*Store, error) {
 	s := &Store{path: path}
+
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -66,21 +62,6 @@ func NewStore(path string) (*Store, error) {
 	return s, nil
 }
 
-// persist escribe la lista completa en disco (fichero temporal + rename).
-func (s *Store) persist(items []SavedItem) error {
-	data, err := json.MarshalIndent(items, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
-}
-
-// Add guarda un elemento nuevo. Si ya existe uno de la misma fuente con el mismo
-// identificador externo, devuelve ErrDuplicate junto con el que ya estaba.
 func (s *Store) Add(it SavedItem) (SavedItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -90,6 +71,7 @@ func (s *Store) Add(it SavedItem) (SavedItem, error) {
 			return old, ErrDuplicate
 		}
 	}
+
 	id, err := newID()
 	if err != nil {
 		return SavedItem{}, err
@@ -110,19 +92,19 @@ func (s *Store) Delete(id string) error {
 	defer s.mu.Unlock()
 
 	for i, it := range s.items {
-		if it.ID == id {
-			items := append(append([]SavedItem{}, s.items[:i]...), s.items[i+1:]...)
-			if err := s.persist(items); err != nil {
-				return err
-			}
-			s.items = items
-			return nil
+		if it.ID != id {
+			continue
 		}
+		items := append(append([]SavedItem{}, s.items[:i]...), s.items[i+1:]...)
+		if err := s.persist(items); err != nil {
+			return err
+		}
+		s.items = items
+		return nil
 	}
 	return ErrNotFound
 }
 
-// List devuelve los elementos que cumplen el filtro, del más reciente al más antiguo.
 func (s *Store) List(f Filter) []SavedItem {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -136,6 +118,28 @@ func (s *Store) List(f Filter) []SavedItem {
 	return out
 }
 
+func (s *Store) Writable() error {
+	f, err := os.CreateTemp(filepath.Dir(s.path), ".healthcheck-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	f.Close()
+	return os.Remove(name)
+}
+
+func (s *Store) persist(items []SavedItem) error {
+	data, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
+}
+
 func (f Filter) matches(it SavedItem) bool {
 	if f.Source != "" && it.Source != f.Source {
 		return false
@@ -143,7 +147,6 @@ func (f Filter) matches(it SavedItem) bool {
 	if f.Tag != "" && !contains(it.Tags, f.Tag) {
 		return false
 	}
-	// Las fechas AAAA-MM-DD se pueden comparar como texto.
 	if (f.From != "" || f.To != "") && it.Date == "" {
 		return false
 	}
@@ -171,15 +174,4 @@ func newID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
-}
-
-// Writable comprueba que el volumen de datos admite escrituras (lo usa /healthz).
-func (s *Store) Writable() error {
-	f, err := os.CreateTemp(filepath.Dir(s.path), ".healthcheck-*")
-	if err != nil {
-		return err
-	}
-	name := f.Name()
-	f.Close()
-	return os.Remove(name)
 }

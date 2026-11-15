@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-// ensureCert genera un certificado autofirmado (ECDSA P-256, 1 año) si no existe.
-// Se guarda en el volumen /certs, así se reutiliza entre reinicios.
 func ensureCert(dir, domain string) (certFile, keyFile string, err error) {
 	certFile = filepath.Join(dir, "server.crt")
 	keyFile = filepath.Join(dir, "server.key")
@@ -33,7 +31,6 @@ func ensureCert(dir, domain string) (certFile, keyFile string, err error) {
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	tmpl := x509.Certificate{
 		SerialNumber: serial,
-		//Linea de asunto (Subject) del certificado, que incluye el nombre común (CommonName), la organización y el país.
 		Subject:      pkix.Name{CommonName: domain, Organization: []string{"Sin entidad"}, Country: []string{"ES"}},
 		DNSNames:     []string{domain},
 		NotBefore:    time.Now().Add(-time.Hour),
@@ -41,6 +38,7 @@ func ensureCert(dir, domain string) (certFile, keyFile string, err error) {
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
 	if err != nil {
 		return "", "", err

@@ -28,7 +28,6 @@ health:
 		printf "%-6s %s\n" $$c "$$(docker inspect -f '{{.State.Health.Status}}' $$c 2>/dev/null || echo 'no existe')"; \
 	done
 
-# Ejecuta go vet y los tests de la app dentro de Docker (no hace falta tener Go instalado)
 test:
 	@docker build --target test -t app-go-fgd-test srcs/requirements/app
 

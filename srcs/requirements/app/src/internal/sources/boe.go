@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// BOE es un buscador de normas del BOE (legislación consolidada).
 type BOE struct {
 	BaseURL string
 	client  *http.Client
@@ -25,7 +24,6 @@ func NewBOE(timeout time.Duration) *BOE {
 func (b *BOE) Name() string  { return "boe" }
 func (b *BOE) Label() string { return "BOE · Legislación consolidada" }
 
-// Partes de la respuesta del BOE que usamos.
 type boeResponse struct {
 	Status struct {
 		Code string `json:"code"`
@@ -55,35 +53,14 @@ type boeNorma struct {
 
 var numeroOficial = regexp.MustCompile(`^\d{1,5}/\d{4}$`)
 
-// buildQuery construye el parámetro "query" que espera la API (un JSON).
-// "39/2015" busca por número oficial; cualquier otro texto busca palabras en el título.
-func (b *BOE) buildQuery(q string) string {
-	var cond string
-	if numeroOficial.MatchString(q) {
-		cond = "numero_oficial:" + q
-	} else {
-		words := strings.Fields(q)
-		parts := make([]string, len(words))
-		for i, w := range words {
-			parts[i] = "titulo:" + w
-		}
-		cond = strings.Join(parts, " and ")
-	}
-	body := map[string]any{
-		"query": map[string]any{"query_string": map[string]string{"query": cond}},
-		"sort":  []map[string]string{{"fecha_publicacion": "desc"}},
-	}
-	out, _ := json.Marshal(body)
-	return string(out)
-}
-
 func (b *BOE) Search(ctx context.Context, query string, limit int) ([]Result, error) {
 	q := cleanQuery(query)
 	if q == "" {
 		return []Result{}, nil
 	}
+
 	params := url.Values{}
-	params.Set("query", b.buildQuery(q))
+	params.Set("query", buildBOEQuery(q))
 	params.Set("limit", strconv.Itoa(limit))
 	endpoint := strings.TrimRight(b.BaseURL, "/") + "/legislacion-consolidada?" + params.Encode()
 
@@ -91,6 +68,7 @@ func (b *BOE) Search(ctx context.Context, query string, limit int) ([]Result, er
 	if err != nil {
 		return nil, err
 	}
+
 	var res boeResponse
 	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, fmt.Errorf("%w: JSON no válido", ErrUpstream)
@@ -103,6 +81,7 @@ func (b *BOE) Search(ctx context.Context, query string, limit int) ([]Result, er
 	if err != nil {
 		return nil, err
 	}
+
 	results := make([]Result, 0, len(normas))
 	for _, n := range normas {
 		if n.Identificador == "" {
@@ -113,7 +92,27 @@ func (b *BOE) Search(ctx context.Context, query string, limit int) ([]Result, er
 	return results, nil
 }
 
-// decodeBOEData acepta los tres formatos que puede tener "data": lista, objeto vacío u objeto único.
+func buildBOEQuery(q string) string {
+	var cond string
+	if numeroOficial.MatchString(q) {
+		cond = "numero_oficial:" + q
+	} else {
+		words := strings.Fields(q)
+		parts := make([]string, len(words))
+		for i, w := range words {
+			parts[i] = "titulo:" + w
+		}
+		cond = strings.Join(parts, " and ")
+	}
+
+	body := map[string]any{
+		"query": map[string]any{"query_string": map[string]string{"query": cond}},
+		"sort":  []map[string]string{{"fecha_publicacion": "desc"}},
+	}
+	out, _ := json.Marshal(body)
+	return string(out)
+}
+
 func decodeBOEData(raw json.RawMessage) ([]boeNorma, error) {
 	s := strings.TrimSpace(string(raw))
 	switch {
@@ -137,6 +136,7 @@ func decodeBOEData(raw json.RawMessage) ([]boeNorma, error) {
 func (n boeNorma) toResult() Result {
 	extra := map[string]string{}
 	var summary []string
+
 	if n.Rango != nil && n.Rango.Texto != "" {
 		extra["rango"] = n.Rango.Texto
 		summary = append(summary, n.Rango.Texto)
@@ -168,6 +168,7 @@ func (n boeNorma) toResult() Result {
 	if link == "" {
 		link = "https://www.boe.es/buscar/act.php?id=" + url.QueryEscape(n.Identificador)
 	}
+
 	return Result{
 		Source:     "boe",
 		ExternalID: n.Identificador,
@@ -179,7 +180,6 @@ func (n boeNorma) toResult() Result {
 	}
 }
 
-// boeDate convierte "20140506" o "20261008T131218Z" en "2014-05-06".
 func boeDate(s string) string {
 	if len(s) < 8 {
 		return ""

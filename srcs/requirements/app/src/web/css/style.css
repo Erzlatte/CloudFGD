@@ -8,7 +8,7 @@
   --accent-text: #ffffff;
   --error: #c62828;
   --ok: #2e7d32;
-  --boe: #a4262c;      /* color de la etiqueta de cada fuente */
+  --boe: #a4262c;
   --datosgob: #1f5fa8;
   --chip: #e8f4f4;
 }
@@ -47,10 +47,27 @@ body {
 }
 
 h1 { margin: 0; }
+h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
 h3 { margin: .35rem 0; font-size: 1.05rem; line-height: 1.35; }
 .sub { color: var(--muted); margin: .25rem 0 0; }
 
-/* ── Pestañas ── */
+code {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: .9em;
+  background: var(--chip);
+  padding: .05rem .3rem;
+  border-radius: 4px;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.help-link { white-space: nowrap; }
+
 .tabs {
   display: flex;
   gap: .25rem;
@@ -83,7 +100,6 @@ h3 { margin: .35rem 0; font-size: 1.05rem; line-height: 1.35; }
   font-size: .8rem;
 }
 
-/* ── Formularios ── */
 .panel {
   padding: 1rem;
   background: var(--surface);
@@ -123,7 +139,7 @@ input, select, textarea, button {
 
 textarea { resize: vertical; }
 
-input:focus, select:focus, textarea:focus, button:focus-visible {
+input:focus, select:focus, textarea:focus, button:focus-visible, summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -151,7 +167,39 @@ button.danger {
 
 button:disabled { opacity: .55; cursor: default; }
 
-/* ── Mensajes de estado ── */
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  margin-top: .6rem;
+  font-size: .85rem;
+  color: var(--muted);
+}
+
+button.chip {
+  background: var(--chip);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: .15rem .7rem;
+  font-weight: 500;
+  font-size: .85rem;
+}
+
+button.chip:hover { border-color: var(--accent); }
+
+.empty-state {
+  margin-top: .5rem;
+  padding: 1rem 1.25rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.empty-state p { margin: 0 0 .4rem; color: var(--text); }
+.empty-state ol { margin: 0; padding-left: 1.2rem; }
+
 .status { margin: .75rem 0; min-height: 1.5em; font-size: .9rem; color: var(--muted); }
 .status.error { color: var(--error); }
 .status.ok { color: var(--ok); }
@@ -164,7 +212,6 @@ button:disabled { opacity: .55; cursor: default; }
   font-size: .9rem;
 }
 
-/* ── Tarjetas ── */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -250,7 +297,50 @@ button:disabled { opacity: .55; cursor: default; }
   font-size: .8rem;
 }
 
-.empty { color: var(--muted); }
+.help-intro .steps {
+  margin: 0;
+  padding-left: 1.3rem;
+}
+.help-intro .steps li { margin: .25rem 0; }
+
+.faq-title { margin-top: 1.5rem; }
+
+.faq details {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: .5rem 0;
+}
+
+.faq summary {
+  list-style: none;
+  cursor: pointer;
+  padding: .75rem 2.5rem .75rem 1rem;
+  font-weight: 600;
+  position: relative;
+  border-radius: 8px;
+}
+
+.faq summary::-webkit-details-marker { display: none; }
+
+.faq summary::after {
+  content: "+";
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.25rem;
+  color: var(--accent);
+}
+
+.faq details[open] summary::after { content: "−"; }
+.faq details[open] summary { border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; }
+
+.faq details > :not(summary) {
+  margin: .6rem 1rem;
+}
+.faq details > :last-child { margin-bottom: .9rem; }
+.faq ul { padding-left: 1.2rem; }
 
 .legal {
   margin-top: 2.5rem;
@@ -261,4 +351,6 @@ button:disabled { opacity: .55; cursor: default; }
 @media (max-width: 560px) {
   .search-form { grid-template-columns: 1fr; }
   .saved-at { margin-left: 0; width: 100%; }
+  .top { flex-direction: column; }
+  .tabs button { padding: .6rem .7rem; }
 }
