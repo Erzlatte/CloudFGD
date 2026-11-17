@@ -6,14 +6,11 @@ import (
 	"sync"
 )
 
-// SourceError describe el fallo de una fuente concreta. Las demás siguen funcionando.
 type SourceError struct {
 	Source  string `json:"source"`
 	Message string `json:"message"`
 }
 
-// SearchAll consulta varias fuentes a la vez (una goroutine por fuente)
-// y junta los resultados en el orden en que se pasaron las fuentes.
 func SearchAll(ctx context.Context, srcs []Source, query string, limit int) ([]Result, []SourceError) {
 	type answer struct {
 		results []Result

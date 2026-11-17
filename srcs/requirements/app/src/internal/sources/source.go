@@ -1,5 +1,3 @@
-// Package sources contiene los conectores a las APIs públicas.
-// Cada conector traduce la respuesta de su API al formato común Result.
 package sources
 
 import (
@@ -14,7 +12,6 @@ import (
 	"unicode/utf8"
 )
 
-// Result es un resultado de búsqueda normalizado, igual para todas las fuentes.
 type Result struct {
 	Source     string            `json:"source"`
 	ExternalID string            `json:"external_id"`
@@ -25,19 +22,19 @@ type Result struct {
 	Extra      map[string]string `json:"extra,omitempty"`
 }
 
-// Source es lo que tiene que cumplir cualquier conector.
 type Source interface {
 	Name() string
 	Label() string
 	Search(ctx context.Context, query string, limit int) ([]Result, error)
 }
 
-// ErrUpstream indica que la API externa falló o devolvió algo inesperado.
 var ErrUpstream = errors.New("la fuente externa no respondió correctamente")
 
-const userAgent = "CloudFGD/1.0 (proyecto educativo)"
+const (
+	userAgent    = "CloudFGD/1.0 (proyecto educativo)"
+	maxBodyBytes = 5 << 20
+)
 
-// getJSON hace un GET y devuelve el cuerpo si la respuesta es 200.
 func getJSON(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -52,7 +49,7 @@ func getJSON(ctx context.Context, client *http.Client, url string) ([]byte, erro
 	}
 	defer res.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(res.Body, 5<<20))
+	body, err := io.ReadAll(io.LimitReader(res.Body, maxBodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUpstream, err)
 	}
@@ -69,7 +66,6 @@ func newClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout}
 }
 
-// truncate corta un texto a n caracteres sin partir letras con tilde.
 func truncate(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if utf8.RuneCountInString(s) <= n {
@@ -81,7 +77,6 @@ func truncate(s string, n int) string {
 
 var unsafeChars = regexp.MustCompile(`[^\p{L}\p{N}\s/\-.]`)
 
-// cleanQuery quita caracteres que podrían romper la sintaxis de búsqueda de las APIs.
 func cleanQuery(q string) string {
 	q = unsafeChars.ReplaceAllString(q, " ")
 	return strings.Join(strings.Fields(q), " ")

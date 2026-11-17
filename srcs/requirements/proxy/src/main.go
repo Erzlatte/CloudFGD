@@ -1,5 +1,3 @@
-// Proxy inverso con TLS escrito en Go: sustituye a nginx.
-// Es el único punto de entrada (puerto 443) y solo acepta TLS 1.2 y 1.3.
 package main
 
 import (
@@ -23,12 +21,8 @@ func env(key, def string) string {
 func main() {
 	port := env("PROXY_PORT", "443")
 
-	// Modo healthcheck: pide /healthz a través del propio proxy (HTTPS).
-	// Solo da OK si el proxy responde Y la app que hay detrás está sana.
 	check := flag.Bool("healthcheck", false, "comprueba https://127.0.0.1/healthz y sale")
 	flag.Parse()
-
-	// Si se pasa --healthcheck, no arranca el proxy, solo comprueba la app.
 	if *check {
 		os.Exit(runHealthcheck("https://127.0.0.1:"+port+"/healthz", true))
 	}
@@ -43,8 +37,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// ReverseProxy reenvía cada petición a la app y añade las cabeceras
-	// X-Forwarded-For / X-Forwarded-Proto para que la app sepa el origen real.
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(upstream)
@@ -57,7 +49,6 @@ func main() {
 		},
 	}
 
-	// Middleware de log: una línea por petición (equivalente al access_log de nginx).
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		proxy.ServeHTTP(w, r)

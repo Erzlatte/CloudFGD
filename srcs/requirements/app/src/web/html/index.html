@@ -5,13 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CloudFGD · Archivador de información pública</title>
   <link rel="stylesheet" href="/css/style.css">
-  <script src="/js/app.js" defer></script>
+  <script type="module" src="/js/app.js"></script>
 </head>
 <body>
   <main class="container">
     <header class="top">
-      <h1>CloudFGD</h1>
-      <p class="sub">Busca en fuentes públicas y guarda lo que quieras seguir</p>
+      <div>
+        <h1>CloudFGD</h1>
+        <p class="sub">Busca en fuentes públicas y guarda lo que quieras seguir</p>
+      </div>
+      <button type="button" class="secondary help-link" data-open-tab="help">¿Cómo funciona?</button>
     </header>
 
     <noscript><p class="status error">Esta aplicación necesita JavaScript.</p></noscript>
@@ -21,24 +24,41 @@
       <button id="tab-saved" role="tab" aria-selected="false" aria-controls="panel-saved">
         Guardados <span id="saved-count" class="count">0</span>
       </button>
+      <button id="tab-help" role="tab" aria-selected="false" aria-controls="panel-help">Ayuda</button>
     </nav>
 
-    <!-- Buscador -->
     <section id="panel-search" role="tabpanel" aria-labelledby="tab-search">
       <form id="search-form" class="panel search-form">
         <input id="q" type="search" name="q" maxlength="100" required
-               placeholder="Ej.: trabajo autónomo, 39/2015, paro registrado" aria-label="Texto a buscar">
+               placeholder="Escribe un tema, p. ej. trabajo autónomo" aria-label="Texto a buscar">
         <select id="source" name="source" aria-label="Fuente">
           <option value="all">Todas las fuentes</option>
         </select>
         <button type="submit">Buscar</button>
       </form>
+
+      <div class="examples">
+        <span>Prueba con:</span>
+        <button type="button" class="chip" data-example="trabajo autónomo">trabajo autónomo</button>
+        <button type="button" class="chip" data-example="39/2015">39/2015</button>
+        <button type="button" class="chip" data-example="paro registrado">paro registrado</button>
+        <button type="button" class="chip" data-example="vivienda">vivienda</button>
+      </div>
+
       <p id="search-status" class="status" role="status" aria-live="polite"></p>
       <div id="source-errors"></div>
-      <div id="results"></div>
+      <div id="results">
+        <div class="empty-state">
+          <p><strong>¿Por dónde empiezo?</strong></p>
+          <ol>
+            <li>Escribe un tema o el número de una ley y pulsa <em>Buscar</em>.</li>
+            <li>Abre <em>Ver detalle</em> para ver los datos de cada resultado.</li>
+            <li>Pulsa <em>Guardar</em> para añadirlo a tu lista con etiquetas y una nota.</li>
+          </ol>
+        </div>
+      </div>
     </section>
 
-    <!-- Lista de guardados -->
     <section id="panel-saved" role="tabpanel" aria-labelledby="tab-saved" hidden>
       <form id="filter-form" class="panel filters">
         <label>Fuente
@@ -59,13 +79,87 @@
       <div id="saved-list"></div>
     </section>
 
+    <section id="panel-help" role="tabpanel" aria-labelledby="tab-help" hidden>
+      <div class="panel help-intro">
+        <h2>Guía rápida</h2>
+        <ol class="steps">
+          <li><strong>Busca</strong> un tema, una palabra o el número de una ley (por ejemplo, <code>39/2015</code>).</li>
+          <li><strong>Revisa</strong> los resultados: cada tarjeta indica de qué fuente viene y su fecha.</li>
+          <li><strong>Guarda</strong> lo que te interese y ponle etiquetas para encontrarlo después.</li>
+          <li><strong>Consulta</strong> tu lista en <em>Guardados</em> y fíltrala por fuente, etiqueta o fecha.</li>
+        </ol>
+      </div>
+
+      <h2 class="faq-title">Preguntas frecuentes</h2>
+      <div class="faq">
+        <details name="faq">
+          <summary>¿Qué es CloudFGD y para qué sirve?</summary>
+          <p>Es un buscador que consulta a la vez varias fuentes oficiales de información pública y te deja guardar lo que te interesa en una lista propia, con etiquetas y notas.</p>
+        </details>
+
+        <details name="faq">
+          <summary>¿En qué fuentes busca?</summary>
+          <p>En dos fuentes oficiales:</p>
+          <ul>
+            <li><strong>BOE · Legislación consolidada:</strong> leyes y normas con sus modificaciones incorporadas.</li>
+            <li><strong>datos.gob.es:</strong> el catálogo nacional de conjuntos de datos abiertos (estadísticas, listados, registros…).</li>
+          </ul>
+          <p>Con el desplegable de la búsqueda puedes elegir una sola fuente o todas.</p>
+        </details>
+
+        <details name="faq">
+          <summary>¿Cómo busco una ley concreta?</summary>
+          <p>Escribe su número oficial con la barra, por ejemplo <code>39/2015</code>, y elige la fuente <em>BOE</em>. El buscador lo reconoce y busca por número en lugar de por palabras.</p>
+        </details>
+
+        <details name="faq">
+          <summary>No encuentro resultados. ¿Qué hago?</summary>
+          <p>Las fuentes buscan las palabras en el <strong>título</strong> de cada documento y exigen que aparezcan todas. Prueba con menos palabras o con términos más generales (por ejemplo, <em>vivienda</em> en lugar de <em>ayudas al alquiler de vivienda joven</em>).</p>
+        </details>
+
+        <details name="faq">
+          <summary>Me sale el aviso «la fuente tardó demasiado en responder»</summary>
+          <p>Una de las fuentes oficiales está lenta o no está disponible en ese momento. Los resultados de las demás fuentes se muestran igualmente. Vuelve a intentarlo pasados unos minutos.</p>
+        </details>
+
+        <details name="faq">
+          <summary>¿Cómo guardo un resultado y para qué sirven las etiquetas?</summary>
+          <p>Pulsa <em>Guardar</em> en la tarjeta, escribe las etiquetas separadas por comas (por ejemplo, <code>autónomos, empleo</code>) y, si quieres, una nota. Después podrás filtrar tu lista por cualquiera de esas etiquetas.</p>
+        </details>
+
+        <details name="faq">
+          <summary>¿Cómo encuentro algo que guardé?</summary>
+          <p>En la pestaña <em>Guardados</em> puedes filtrar por fuente, por etiqueta y por la fecha del documento. <em>Quitar filtros</em> vuelve a mostrar toda la lista.</p>
+        </details>
+
+        <details name="faq">
+          <summary>¿Puedo cambiar las etiquetas o la nota de algo guardado?</summary>
+          <p>Por ahora no. Puedes borrarlo desde <em>Guardados</em> y volver a guardarlo desde la búsqueda con las etiquetas y la nota nuevas.</p>
+        </details>
+
+        <details name="faq">
+          <summary>¿Dónde se guardan mis datos? ¿Los ve otra gente?</summary>
+          <p>Se guardan en el servidor donde está instalada la aplicación, no en tu navegador. Hay una única lista: cualquiera que use esta misma instalación ve los mismos guardados.</p>
+        </details>
+
+        <details name="faq">
+          <summary>¿La información tiene validez legal?</summary>
+          <p>No. CloudFGD muestra una copia resumida para ayudarte a encontrar documentos. Para cualquier uso jurídico consulta siempre la publicación oficial con el enlace <em>Fuente oficial ↗</em>.</p>
+        </details>
+
+        <details name="faq">
+          <summary>¿Por qué el navegador dice que la conexión no es segura?</summary>
+          <p>La aplicación usa un certificado propio (autofirmado) que tu navegador no conoce. La conexión sí va cifrada; puedes aceptar el aviso para continuar.</p>
+        </details>
+      </div>
+    </section>
+
     <footer class="legal">
       La información procede de fuentes oficiales (BOE, datos.gob.es). CloudFGD guarda solo una copia
       ligera: para cualquier uso jurídico consulta siempre la publicación oficial enlazada.
     </footer>
   </main>
 
-  <!-- Molde de un resultado de búsqueda -->
   <template id="result-template">
     <article class="card">
       <header class="card-head">
@@ -95,7 +189,6 @@
     </article>
   </template>
 
-  <!-- Molde de un elemento guardado -->
   <template id="saved-template">
     <article class="card">
       <header class="card-head">

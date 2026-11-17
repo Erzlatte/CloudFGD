@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-// DatosGob consulta el catálogo nacional de datos abiertos (datos.gob.es).
-// Documentación: https://datos.gob.es/en/accessible-apidata
 type DatosGob struct {
 	BaseURL string
 	client  *http.Client
@@ -37,6 +35,7 @@ func (d *DatosGob) Search(ctx context.Context, query string, limit int) ([]Resul
 	if q == "" {
 		return []Result{}, nil
 	}
+
 	params := url.Values{}
 	params.Set("_pageSize", strconv.Itoa(limit))
 	params.Set("_page", "0")
@@ -46,6 +45,7 @@ func (d *DatosGob) Search(ctx context.Context, query string, limit int) ([]Resul
 	if err != nil {
 		return nil, err
 	}
+
 	var res datosGobResponse
 	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, fmt.Errorf("%w: JSON no válido", ErrUpstream)
@@ -66,6 +66,7 @@ func datosGobResult(item map[string]json.RawMessage) (Result, bool) {
 	if id == "" {
 		return Result{}, false
 	}
+
 	link := about
 	if !strings.HasPrefix(link, "http://") && !strings.HasPrefix(link, "https://") {
 		link = "https://datos.gob.es/es/catalogo/" + url.PathEscape(id)
@@ -89,10 +90,12 @@ func datosGobResult(item map[string]json.RawMessage) (Result, bool) {
 	if date == "" {
 		date = anyDate(text(item["issued"]))
 	}
+
 	title := text(item["title"])
 	if title == "" {
 		title = id
 	}
+
 	return Result{
 		Source:     "datosgob",
 		ExternalID: id,
@@ -104,32 +107,27 @@ func datosGobResult(item map[string]json.RawMessage) (Result, bool) {
 	}, true
 }
 
-// ── Ayudas para leer los campos de datos.gob.es ──
-// La API devuelve el mismo campo de varias formas según el conjunto de datos:
-//   "texto"
-//   {"_value": "texto", "_lang": "es"}
-//   [{"_value": "...", "_lang": "en"}, {"_value": "...", "_lang": "es"}]
-// Estas funciones aceptan cualquiera de ellas y prefieren el español.
-
 type langValue struct {
 	Value string `json:"_value"`
 	Lang  string `json:"_lang"`
 	About string `json:"_about"`
 }
 
-// values devuelve todos los valores de un campo, con su idioma si lo tiene.
 func values(raw json.RawMessage) []langValue {
 	if len(raw) == 0 {
 		return nil
 	}
+
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return []langValue{{Value: s}}
 	}
+
 	var one langValue
 	if json.Unmarshal(raw, &one) == nil && (one.Value != "" || one.About != "") {
 		return []langValue{one}
 	}
+
 	var list []json.RawMessage
 	if json.Unmarshal(raw, &list) == nil {
 		var out []langValue
@@ -148,7 +146,6 @@ func valueOf(v langValue) string {
 	return v.About
 }
 
-// text devuelve un único texto, en español si existe.
 func text(raw json.RawMessage) string {
 	vals := values(raw)
 	for _, v := range vals {
@@ -164,11 +161,9 @@ func text(raw json.RawMessage) string {
 	return ""
 }
 
-// texts devuelve todos los textos en español (o todos, si ninguno indica idioma).
 func texts(raw json.RawMessage) []string {
-	vals := values(raw)
 	var es, all []string
-	for _, v := range vals {
+	for _, v := range values(raw) {
 		s := strings.TrimSpace(valueOf(v))
 		if s == "" {
 			continue
@@ -184,7 +179,6 @@ func texts(raw json.RawMessage) []string {
 	return all
 }
 
-// publisher acepta una URL ("…/Organismo/E05024401") o un objeto con nombre.
 func publisher(raw json.RawMessage) string {
 	var obj struct {
 		Name  json.RawMessage `json:"name"`
@@ -219,7 +213,6 @@ func lastSegments(raw json.RawMessage) []string {
 	return out
 }
 
-// Las fechas de datos.gob.es pueden venir en varios formatos, a veces con meses en español.
 var spanishDate = strings.NewReplacer(
 	"lun,", "Mon,", "mar,", "Tue,", "mié,", "Wed,", "mie,", "Wed,", "jue,", "Thu,", "vie,", "Fri,", "sáb,", "Sat,", "sab,", "Sat,", "dom,", "Sun,",
 	" ene ", " Jan ", " feb ", " Feb ", " mar ", " Mar ", " abr ", " Apr ", " may ", " May ", " jun ", " Jun ",
@@ -227,6 +220,14 @@ var spanishDate = strings.NewReplacer(
 )
 
 var isoPrefix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}`)
+
+var dateLayouts = []string{
+	time.RFC1123,
+	time.RFC1123Z,
+	"Mon, 2 Jan 2006 15:04:05 MST",
+	"02 Jan 2006 15:04:05",
+	"2 Jan 2006",
+}
 
 func anyDate(s string) string {
 	s = strings.TrimSpace(s)
@@ -236,8 +237,9 @@ func anyDate(s string) string {
 	if m := isoPrefix.FindString(s); m != "" {
 		return m
 	}
+
 	en := spanishDate.Replace(s)
-	for _, layout := range []string{time.RFC1123, time.RFC1123Z, "Mon, 2 Jan 2006 15:04:05 MST", "02 Jan 2006 15:04:05", "2 Jan 2006"} {
+	for _, layout := range dateLayouts {
 		if t, err := time.Parse(layout, en); err == nil {
 			return t.Format("2006-01-02")
 		}
