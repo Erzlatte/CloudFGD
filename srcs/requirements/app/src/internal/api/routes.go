@@ -47,6 +47,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST "+RouteSaved, s.handleCreateSaved)
 	mux.HandleFunc("DELETE "+RouteSavedItem, s.handleDeleteSaved)
 	mux.HandleFunc("GET "+RouteHealth, s.handleHealth)
+	mux.HandleFunc("GET "+RoutePod, s.handlePod)
 
 	return mux
 }

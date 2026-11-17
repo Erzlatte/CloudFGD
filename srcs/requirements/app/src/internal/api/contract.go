@@ -11,6 +11,7 @@ const (
 	RouteSaved     = "/api/saved"
 	RouteSavedItem = "/api/saved/{id}"
 	RouteHealth    = "/healthz"
+	RoutePod       = "/pod"
 )
 
 const (

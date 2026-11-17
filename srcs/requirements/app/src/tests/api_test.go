@@ -185,6 +185,9 @@ func TestAPIFrontendYSalud(t *testing.T) {
 			t.Errorf("GET %s -> %d %q", path, rec.Code, rec.Header().Get("Content-Type"))
 		}
 	}
+	if rec := app.do(t, "GET", api.RoutePod, ""); rec.Code != http.StatusOK || !strings.HasPrefix(rec.Body.String(), "Hola desde el pod ") {
+		t.Errorf("GET %s -> %d %q", api.RoutePod, rec.Code, rec.Body.String())
+	}
 	if rec := app.do(t, "GET", "/no-existe", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("ruta desconocida -> %d", rec.Code)
 	}
