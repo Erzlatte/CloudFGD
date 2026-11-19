@@ -25,6 +25,7 @@ y cómo se construye, se prueba y se arranca.
 11. [API REST](#11-api-rest)
 12. [Problemas frecuentes](#12-problemas-frecuentes)
 13. [Referencias de las herramientas](#13-referencias-de-las-herramientas)
+14. [Despliegue en Kubernetes con Jenkins](#14-despliegue-en-kubernetes-con-jenkins)
 
 ---
 
@@ -111,7 +112,7 @@ CloudFGD/
         └── app/
             ├── Dockerfile             etapas build, test y final
             └── src/
-                ├── go.mod             módulo CloudFGD/app, Go 1.22+
+                ├── go.mod             módulo CloudFGD/app, Go 1.27+
                 ├── main.go            arranque y montaje de piezas
                 ├── internal/
                 │   ├── api/
@@ -658,17 +659,18 @@ en el contrato. No cubren las APIs reales ni el JavaScript del navegador.
 ### 10.1 Dockerfile de la `app`
 
 ```
-build:  alpine:3.23 + go       →  CGO_ENABLED=0 go build  →  binario estático con web/ incrustado
+build:  golang:1.27-alpine3.24  →  CGO_ENABLED=0 go build  →  binario estático con web/ incrustado
 test:   FROM build             →  go vet ./... && go test ./tests/...   (solo con make test)
-final:  alpine:3.23 + ca-certificates  →  solo el binario
+final:  alpine:3.24 + apk upgrade + ca-certificates  →  solo el binario
 ```
 
 | Instrucción de la etapa final | Para qué |
 |-------------------------------|----------|
 | `apk add ca-certificates` | Sin ellos Go no puede verificar el HTTPS del BOE ni de datos.gob.es |
-| `adduser -D -H app` + `chown /data` | Usuario sin privilegios dueño de la carpeta de datos |
+| `apk upgrade` | Aplica los últimos parches de seguridad de los paquetes de Alpine al construir |
+| `adduser -D -H -u 1000 app` + `chown /data` | Usuario sin privilegios (UID 1000) dueño de la carpeta de datos |
 | `COPY --from=build` | Solo el binario: ni compilador ni código fuente |
-| `USER app` | No se ejecuta como root |
+| `USER 1000` | No se ejecuta como root. Se usa el UID numérico para que Kubernetes pueda comprobarlo (`runAsNonRoot`) |
 | `HEALTHCHECK … app -healthcheck` | Cada 10 s; 3 s de límite; 5 s de margen al arrancar; 3 fallos → `unhealthy` |
 | `ENTRYPOINT` | El binario es el PID 1 y recibe bien la señal de `docker stop` |
 
@@ -783,3 +785,38 @@ Documentación oficial de lo que usa el código, por si una parte no se entiende
 | `textContent` y XSS | Pintar texto de forma segura | [Node.textContent](https://developer.mozilla.org/es/docs/Web/API/Node/textContent) · [OWASP XSS](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html) |
 | API del BOE | `boe.go` | [Datos abiertos del BOE](https://www.boe.es/datosabiertos/api/api.php) · [Manual (PDF)](https://www.boe.es/datosabiertos/documentos/APIconsolidada.pdf) |
 | API de datos.gob.es | `datosgob.go` | [apidata](https://datos.gob.es/en/accessible-apidata) |
+
+---
+
+## 14. Despliegue en Kubernetes con Jenkins
+
+Además de Docker Compose, la `app` se despliega en Kubernetes (Minikube) desde Jenkins. El `proxy`
+no se despliega: su papel de puerta de entrada lo cumple el Service.
+
+```
+rama personal ──PR──> develop ──push──> Jenkins (despliegue-pruebas) ──> namespace pruebas
+                       develop ──PR──> main ──push──> Jenkins (despliegue-produccion) ──> namespace produccion
+```
+
+| Fichero | Qué hace |
+|---------|----------|
+| `Jenkinsfile` | Preparar (elige entorno por rama) → Test (`go vet` y tests) → Build → Deploy → Verify |
+| `k8s/deployment.yaml` | 2 réplicas, actualización sin cortes (`maxUnavailable: 0`), sondas sobre `/healthz`, usuario no root, sistema de ficheros de solo lectura y `emptyDir` en `/data` |
+| `k8s/service.yaml` | Service `LoadBalancer`: puerto 80 → 8080 de los pods |
+| `GET /pod` | Devuelve el nombre del pod que responde; sirve para comprobar el balanceo |
+
+| Rama | Job de Jenkins | Namespace |
+|------|----------------|-----------|
+| `develop` | `despliegue-pruebas` | `pruebas` |
+| `main` | `despliegue-produccion` | `produccion` |
+
+Comprobación del balanceo:
+
+```sh
+URL=$(minikube service cloudfgd -n produccion --url)
+for i in $(seq 10); do curl -s $URL/pod; done
+```
+
+Limitación: cada réplica guarda sus elementos en su propio `/data` (`emptyDir`), que se pierde al
+recrear el pod. Para compartir los guardados entre réplicas habría que usar una base de datos.
+

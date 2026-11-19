@@ -1,13 +1,12 @@
-FROM alpine:3.23 AS build
+FROM golang:1.27-alpine3.24 AS build
 
-RUN apk add --no-cache go
 WORKDIR /src
 COPY src/ .
-RUN CGO_ENABLED=0 go build -o /out/proxy .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/proxy .
 
-FROM alpine:3.23
+FROM alpine:3.24
 
-RUN mkdir -p /certs
+RUN apk upgrade --no-cache && mkdir -p /certs
 COPY --from=build /out/proxy /usr/local/bin/proxy
 
 EXPOSE 443
